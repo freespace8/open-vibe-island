@@ -20,11 +20,20 @@ struct ControlCenterView: View {
     private var sessionColumn: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 20) {
-                VStack(alignment: .leading, spacing: 10) {
-                    Text("Vibe Island OSS")
-                        .font(.system(size: 28, weight: .bold, design: .rounded))
-                    Text("Native macOS scaffold for monitoring, approvals, and jump-back flows.")
-                        .foregroundStyle(.secondary)
+                HStack(alignment: .top, spacing: 16) {
+                    VibeMascotBadge(size: 92, isAnimating: model.liveRunningCount > 0)
+
+                    VStack(alignment: .leading, spacing: 10) {
+                        Text("Vibe Island OSS")
+                            .font(.system(size: 28, weight: .bold, design: .rounded))
+                        Text("Native macOS scaffold for monitoring, approvals, and jump-back flows.")
+                            .foregroundStyle(.secondary)
+                        Text("New pixel mascot rendered as a scalable sprite so it stays crisp in the notch and in the control center.")
+                            .font(.caption)
+                            .foregroundStyle(.tertiary)
+                    }
+
+                    Spacer(minLength: 0)
                 }
 
                 HStack(spacing: 12) {
