@@ -168,7 +168,7 @@ struct IslandPanelView: View {
             HStack(spacing: 0) {
                 if hasClosedPresence {
                     HStack(spacing: 4) {
-                        VibeMascotMark(size: 16, isAnimating: hasClosedActivity)
+                        VibeIslandIcon(size: 14, isAnimating: hasClosedActivity)
                             .matchedGeometryEffect(id: "island-icon", in: notchNamespace, isSource: true)
 
                         if closedSpotlightSession?.phase.requiresAttention == true {
@@ -667,6 +667,33 @@ private struct IslandCompactButtonStyle: ButtonStyle {
                 in: Capsule()
             )
             .opacity(configuration.isPressed ? 0.7 : 1)
+    }
+}
+
+// MARK: - Vibe Island icon (left side of closed notch)
+
+private struct VibeIslandIcon: View {
+    let size: CGFloat
+    var isAnimating: Bool = false
+    var tint: Color = .mint
+
+    var body: some View {
+        VStack(spacing: 2) {
+            HStack(spacing: 2) {
+                iconBlock
+                iconBlock
+            }
+            HStack(spacing: 2) {
+                iconBlock
+                iconBlock
+            }
+        }
+        .frame(width: size, height: size)
+    }
+
+    private var iconBlock: some View {
+        RoundedRectangle(cornerRadius: 1.8, style: .continuous)
+            .fill(tint.opacity(isAnimating ? 1.0 : 0.82))
     }
 }
 
