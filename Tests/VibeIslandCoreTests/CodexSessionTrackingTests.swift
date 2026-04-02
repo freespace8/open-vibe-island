@@ -30,8 +30,10 @@ struct CodexSessionTrackingTests {
                 ),
                 codexMetadata: CodexSessionMetadata(
                     transcriptPath: "/tmp/rollout.jsonl",
+                    lastUserPrompt: "Check the rollout watcher state.",
                     lastAssistantMessage: "Inspecting rollout watcher.",
-                    currentTool: "exec_command"
+                    currentTool: "exec_command",
+                    currentCommandPreview: "git status -sb"
                 )
             )
         ]
@@ -41,6 +43,7 @@ struct CodexSessionTrackingTests {
 
         #expect(reloaded == records)
         #expect(reloaded.first?.session.codexMetadata?.transcriptPath == "/tmp/rollout.jsonl")
+        #expect(reloaded.first?.session.codexMetadata?.lastUserPrompt == "Check the rollout watcher state.")
         #expect(reloaded.first?.session.origin == .live)
         #expect(reloaded.first?.session.attachmentState == .attached)
     }
@@ -117,22 +120,23 @@ struct CodexSessionTrackingTests {
     }
 
     @Test
-    func codexRolloutReducerPromotesAssistantMessagesAndCompletion() {
+    func codexRolloutReducerTracksPromptCommandAndCompletion() {
         let initialLines = [
+            rolloutLine(
+                timestamp: "2026-04-02T04:03:44.500Z",
+                type: "event_msg",
+                payload: [
+                    "type": "user_message",
+                    "message": "Check the rollout watcher status.",
+                ]
+            ),
             rolloutLine(
                 timestamp: "2026-04-02T04:03:44.894Z",
                 type: "response_item",
                 payload: [
                     "type": "function_call",
                     "name": "exec_command",
-                ]
-            ),
-            rolloutLine(
-                timestamp: "2026-04-02T04:03:45.000Z",
-                type: "event_msg",
-                payload: [
-                    "type": "agent_message",
-                    "message": "Inspecting README and current hooks config.",
+                    "arguments": "{\"cmd\":\"git status -sb\"}",
                 ]
             ),
         ]
@@ -144,13 +148,23 @@ struct CodexSessionTrackingTests {
             transcriptPath: "/tmp/rollout.jsonl"
         )
 
+        #expect(initialSnapshot.lastUserPrompt == "Check the rollout watcher status.")
         #expect(initialSnapshot.currentTool == "exec_command")
-        #expect(initialSnapshot.lastAssistantMessage == "Inspecting README and current hooks config.")
-        #expect(initialEvents.contains(where: { $0.trackedMetadataUpdate?.codexMetadata.currentTool == "exec_command" }))
-        #expect(initialEvents.contains(where: { $0.trackedActivityUpdate?.summary == "Inspecting README and current hooks config." }))
+        #expect(initialSnapshot.currentCommandPreview == "git status -sb")
+        #expect(initialEvents.contains(where: { $0.trackedMetadataUpdate?.codexMetadata.lastUserPrompt == "Check the rollout watcher status." }))
+        #expect(initialEvents.contains(where: { $0.trackedMetadataUpdate?.codexMetadata.currentCommandPreview == "git status -sb" }))
+        #expect(initialEvents.contains(where: { $0.trackedActivityUpdate?.summary == "Running command." }))
 
         let finalSnapshot = CodexRolloutReducer.snapshot(
             for: initialLines + [
+                rolloutLine(
+                    timestamp: "2026-04-02T04:03:45.000Z",
+                    type: "event_msg",
+                    payload: [
+                        "type": "agent_message",
+                        "message": "Inspecting README and current hooks config.",
+                    ]
+                ),
                 rolloutLine(
                     timestamp: "2026-04-02T04:03:46.000Z",
                     type: "event_msg",
@@ -170,8 +184,10 @@ struct CodexSessionTrackingTests {
 
         #expect(finalSnapshot.phase == .completed)
         #expect(finalSnapshot.currentTool == nil)
+        #expect(finalSnapshot.currentCommandPreview == nil)
         #expect(finalEvents.contains(where: { $0.trackedSessionCompletion?.summary == "Rollout watcher is wired and verified." }))
         #expect(finalEvents.contains(where: { $0.trackedMetadataUpdate?.codexMetadata.currentTool == nil }))
+        #expect(finalEvents.contains(where: { $0.trackedMetadataUpdate?.codexMetadata.currentCommandPreview == nil }))
     }
 
     @Test
@@ -203,10 +219,10 @@ struct CodexSessionTrackingTests {
         try appendRolloutLine(
             rolloutLine(
                 timestamp: "2026-04-02T04:03:44.894Z",
-                type: "response_item",
+                type: "event_msg",
                 payload: [
-                    "type": "function_call",
-                    "name": "exec_command",
+                    "type": "user_message",
+                    "message": "Inspect the README.",
                 ]
             ),
             to: rolloutURL
@@ -216,8 +232,19 @@ struct CodexSessionTrackingTests {
                 timestamp: "2026-04-02T04:03:45.000Z",
                 type: "event_msg",
                 payload: [
-                    "type": "agent_message",
-                    "message": "Inspecting README.",
+                    "type": "task_started",
+                ]
+            ),
+            to: rolloutURL
+        )
+        try appendRolloutLine(
+            rolloutLine(
+                timestamp: "2026-04-02T04:03:45.200Z",
+                type: "response_item",
+                payload: [
+                    "type": "function_call",
+                    "name": "exec_command",
+                    "arguments": "{\"cmd\":\"git status -sb\"}",
                 ]
             ),
             to: rolloutURL
@@ -241,8 +268,9 @@ struct CodexSessionTrackingTests {
         watcher.stop()
 
         let events = await recorder.snapshot()
+        #expect(events.contains(where: { $0.trackedMetadataUpdate?.codexMetadata.lastUserPrompt == "Inspect the README." }))
         #expect(events.contains(where: { $0.trackedMetadataUpdate?.codexMetadata.currentTool == "exec_command" }))
-        #expect(events.contains(where: { $0.trackedActivityUpdate?.summary == "Inspecting README." }))
+        #expect(events.contains(where: { $0.trackedMetadataUpdate?.codexMetadata.currentCommandPreview == "git status -sb" }))
         #expect(events.contains(where: { $0.trackedSessionCompletion?.summary == "Finished the rollout tracking slice." }))
     }
 
@@ -331,6 +359,15 @@ struct CodexSessionTrackingTests {
                 payload: [
                     "type": "function_call",
                     "name": "exec_command",
+                    "arguments": "{\"cmd\":\"git status -sb\"}",
+                ]
+            ),
+            rolloutLine(
+                timestamp: "2026-04-02T04:03:45.500Z",
+                type: "event_msg",
+                payload: [
+                    "type": "user_message",
+                    "message": "Inspect the local rollout files.",
                 ]
             ),
             rolloutLine(
@@ -375,7 +412,9 @@ struct CodexSessionTrackingTests {
             } == recentRolloutURL.resolvingSymlinksInPath().path
         )
         #expect(records.first?.codexMetadata?.lastAssistantMessage == "Inspecting the local rollout files.")
-        #expect(records.first?.codexMetadata?.currentTool == "exec_command")
+        #expect(records.first?.codexMetadata?.lastUserPrompt == "Inspect the local rollout files.")
+        #expect(records.first?.codexMetadata?.currentTool == nil)
+        #expect(records.first?.codexMetadata?.currentCommandPreview == nil)
         #expect(records.first?.origin == .live)
         #expect(records.first?.attachmentState == .stale)
     }

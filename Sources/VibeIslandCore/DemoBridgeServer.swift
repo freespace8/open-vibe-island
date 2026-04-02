@@ -548,16 +548,39 @@ public final class DemoBridgeServer: @unchecked Sendable {
     ) -> CodexSessionMetadata {
         CodexSessionMetadata(
             transcriptPath: update.transcriptPath ?? existing?.transcriptPath,
+            lastUserPrompt: update.lastUserPrompt ?? existing?.lastUserPrompt,
             lastAssistantMessage: update.lastAssistantMessage ?? existing?.lastAssistantMessage,
             currentTool: mergedCurrentTool(
                 existing: existing?.currentTool,
                 update: update.currentTool,
+                hookEventName: hookEventName
+            ),
+            currentCommandPreview: mergedCurrentCommandPreview(
+                existing: existing?.currentCommandPreview,
+                update: update.currentCommandPreview,
                 hookEventName: hookEventName
             )
         )
     }
 
     private func mergedCurrentTool(
+        existing: String?,
+        update: String?,
+        hookEventName: CodexHookEventName
+    ) -> String? {
+        if let update {
+            return update
+        }
+
+        switch hookEventName {
+        case .userPromptSubmit, .postToolUse, .stop:
+            return nil
+        case .sessionStart, .preToolUse:
+            return existing
+        }
+    }
+
+    private func mergedCurrentCommandPreview(
         existing: String?,
         update: String?,
         hookEventName: CodexHookEventName

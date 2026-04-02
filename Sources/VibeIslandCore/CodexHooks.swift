@@ -277,8 +277,10 @@ public extension CodexHookPayload {
     var defaultCodexMetadata: CodexSessionMetadata {
         CodexSessionMetadata(
             transcriptPath: transcriptPath,
+            lastUserPrompt: promptPreview,
             lastAssistantMessage: lastAssistantMessage,
-            currentTool: toolName
+            currentTool: toolName,
+            currentCommandPreview: commandPreview
         )
     }
 

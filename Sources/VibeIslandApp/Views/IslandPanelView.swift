@@ -268,7 +268,7 @@ struct IslandPanelView: View {
     private var sessionList: some View {
         ScrollView {
             LazyVStack(spacing: 4) {
-                ForEach(model.surfacedSessions) { session in
+                ForEach(displayedSessions) { session in
                     IslandSessionRow(
                         session: session,
                         isSelected: session.id == model.focusedSession?.id,
@@ -282,6 +282,10 @@ struct IslandPanelView: View {
             .padding(.vertical, 2)
         }
         .scrollIndicators(.hidden)
+    }
+
+    private var displayedSessions: [AgentSession] {
+        model.surfacedSessions + model.recentSessions
     }
 
     // MARK: - Helpers
@@ -429,20 +433,22 @@ private struct IslandSessionRow: View {
                         .frame(width: 9, height: 9)
 
                     VStack(alignment: .leading, spacing: isSelected ? 4 : 2) {
-                        Text(session.title)
+                        Text(session.spotlightHeadlineText)
                             .font(.system(size: 14, weight: .semibold))
                             .foregroundStyle(.white)
                             .lineLimit(1)
 
-                        Text(session.spotlightPrimaryText)
-                            .font(.system(size: 11.5, weight: .medium))
-                            .foregroundStyle(.white.opacity(0.64))
-                            .lineLimit(1)
+                        if let promptLine = session.spotlightPromptLineText {
+                            Text(promptLine)
+                                .font(.system(size: 11.5, weight: .medium))
+                                .foregroundStyle(.white.opacity(0.62))
+                                .lineLimit(1)
+                        }
 
-                        if isSelected, let secondaryText = session.spotlightSecondaryText {
-                            Text(secondaryText)
-                                .font(.system(size: 11))
-                                .foregroundStyle(.white.opacity(0.38))
+                        if let activityLine = session.spotlightActivityLineText {
+                            Text(activityLine)
+                                .font(.system(size: 11, weight: .medium))
+                                .foregroundStyle(activityColor.opacity(0.94))
                                 .lineLimit(1)
                         }
                     }
@@ -515,14 +521,6 @@ private struct IslandSessionRow: View {
                         .buttonStyle(IslandCompactButtonStyle(tint: .secondary))
                 }
             }
-        } else if let secondaryText = session.spotlightSecondaryText {
-            HStack {
-                Text(secondaryText)
-                    .font(.system(size: 10.5, weight: .medium))
-                    .foregroundStyle(.white.opacity(0.38))
-                    .lineLimit(1)
-                Spacer(minLength: 8)
-            }
         }
     }
 
@@ -554,6 +552,19 @@ private struct IslandSessionRow: View {
         case .waitingForApproval: .orange
         case .waitingForAnswer: .yellow
         case .completed: session.jumpTarget != nil ? .white.opacity(0.5) : .blue
+        }
+    }
+
+    private var activityColor: Color {
+        switch session.spotlightActivityTone {
+        case .live:
+            Color(red: 0.36, green: 0.64, blue: 1.0)
+        case .idle:
+            .white.opacity(0.46)
+        case .ready:
+            .green.opacity(0.92)
+        case .attention:
+            .orange.opacity(0.94)
         }
     }
 }

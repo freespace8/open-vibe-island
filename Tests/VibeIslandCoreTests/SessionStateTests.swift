@@ -347,11 +347,13 @@ struct SessionStateTests {
         var iterator = stream.makeAsyncIterator()
         let startedEvent = try await nextEvent(from: &iterator)
         let jumpTargetEvent = try await nextEvent(from: &iterator)
+        let metadataEvent = try await nextEvent(from: &iterator)
         let activityEvent = try await nextEvent(from: &iterator)
 
         #expect(startedEvent.isSessionStarted)
         #expect(jumpTargetEvent.jumpTargetUpdate?.jumpTarget.terminalApp == "Ghostty")
         #expect(jumpTargetEvent.jumpTargetUpdate?.jumpTarget.terminalSessionID == "ghostty-terminal-42")
+        #expect(metadataEvent.trackedMetadataUpdate?.codexMetadata.lastUserPrompt == "inspect the auth flow")
         #expect(activityEvent.activityUpdate?.summary == "Prompt: inspect the auth flow")
     }
 
@@ -662,6 +664,14 @@ private extension AgentEvent {
 
     var jumpTargetUpdate: JumpTargetUpdated? {
         if case let .jumpTargetUpdated(payload) = self {
+            payload
+        } else {
+            nil
+        }
+    }
+
+    var trackedMetadataUpdate: SessionMetadataUpdated? {
+        if case let .sessionMetadataUpdated(payload) = self {
             payload
         } else {
             nil

@@ -830,8 +830,10 @@ final class AppModel {
 
         let merged = CodexSessionMetadata(
             transcriptPath: discovered.transcriptPath ?? existing.transcriptPath,
+            lastUserPrompt: discovered.lastUserPrompt ?? existing.lastUserPrompt,
             lastAssistantMessage: discovered.lastAssistantMessage ?? existing.lastAssistantMessage,
-            currentTool: discovered.currentTool ?? existing.currentTool
+            currentTool: discovered.currentTool ?? existing.currentTool,
+            currentCommandPreview: discovered.currentCommandPreview ?? existing.currentCommandPreview
         )
         return merged.isEmpty ? nil : merged
     }

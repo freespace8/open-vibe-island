@@ -3,21 +3,31 @@ import Foundation
 
 public struct CodexSessionMetadata: Equatable, Codable, Sendable {
     public var transcriptPath: String?
+    public var lastUserPrompt: String?
     public var lastAssistantMessage: String?
     public var currentTool: String?
+    public var currentCommandPreview: String?
 
     public init(
         transcriptPath: String? = nil,
+        lastUserPrompt: String? = nil,
         lastAssistantMessage: String? = nil,
-        currentTool: String? = nil
+        currentTool: String? = nil,
+        currentCommandPreview: String? = nil
     ) {
         self.transcriptPath = transcriptPath
+        self.lastUserPrompt = lastUserPrompt
         self.lastAssistantMessage = lastAssistantMessage
         self.currentTool = currentTool
+        self.currentCommandPreview = currentCommandPreview
     }
 
     public var isEmpty: Bool {
-        transcriptPath == nil && lastAssistantMessage == nil && currentTool == nil
+        transcriptPath == nil
+            && lastUserPrompt == nil
+            && lastAssistantMessage == nil
+            && currentTool == nil
+            && currentCommandPreview == nil
     }
 }
 
@@ -312,8 +322,10 @@ public final class CodexRolloutDiscovery: @unchecked Sendable {
         let updatedAt = snapshot.updatedAt ?? sessionMeta.timestamp ?? modifiedAt
         let metadata = CodexSessionMetadata(
             transcriptPath: fileURL.path,
+            lastUserPrompt: snapshot.lastUserPrompt,
             lastAssistantMessage: snapshot.lastAssistantMessage,
-            currentTool: snapshot.currentTool
+            currentTool: snapshot.currentTool,
+            currentCommandPreview: snapshot.currentCommandPreview
         )
 
         return CodexTrackedSessionRecord(
@@ -370,30 +382,38 @@ public struct CodexRolloutSnapshot: Equatable, Sendable {
     public var summary: String?
     public var phase: SessionPhase
     public var updatedAt: Date?
+    public var lastUserPrompt: String?
     public var lastAssistantMessage: String?
     public var currentTool: String?
+    public var currentCommandPreview: String?
     public var isCompleted: Bool
 
     public init(
         summary: String? = nil,
         phase: SessionPhase = .running,
         updatedAt: Date? = nil,
+        lastUserPrompt: String? = nil,
         lastAssistantMessage: String? = nil,
         currentTool: String? = nil,
+        currentCommandPreview: String? = nil,
         isCompleted: Bool = false
     ) {
         self.summary = summary
         self.phase = phase
         self.updatedAt = updatedAt
+        self.lastUserPrompt = lastUserPrompt
         self.lastAssistantMessage = lastAssistantMessage
         self.currentTool = currentTool
+        self.currentCommandPreview = currentCommandPreview
         self.isCompleted = isCompleted
     }
 
     public var metadata: CodexSessionMetadata {
         CodexSessionMetadata(
+            lastUserPrompt: lastUserPrompt,
             lastAssistantMessage: lastAssistantMessage,
-            currentTool: currentTool
+            currentTool: currentTool,
+            currentCommandPreview: currentCommandPreview
         )
     }
 }
@@ -434,14 +454,18 @@ public enum CodexRolloutReducer {
         let oldMetadata = oldSnapshot.map {
             CodexSessionMetadata(
                 transcriptPath: transcriptPath,
+                lastUserPrompt: $0.lastUserPrompt,
                 lastAssistantMessage: $0.lastAssistantMessage,
-                currentTool: $0.currentTool
+                currentTool: $0.currentTool,
+                currentCommandPreview: $0.currentCommandPreview
             )
         }
         let newMetadata = CodexSessionMetadata(
             transcriptPath: transcriptPath,
+            lastUserPrompt: newSnapshot.lastUserPrompt,
             lastAssistantMessage: newSnapshot.lastAssistantMessage,
-            currentTool: newSnapshot.currentTool
+            currentTool: newSnapshot.currentTool,
+            currentCommandPreview: newSnapshot.currentCommandPreview
         )
 
         if oldMetadata != newMetadata {
@@ -499,17 +523,31 @@ public enum CodexRolloutReducer {
             snapshot.phase = .running
             snapshot.isCompleted = false
             snapshot.summary = snapshot.summary ?? "Codex started a new turn."
+        case "user_message":
+            guard let message = clipped(payload["message"] as? String), !message.isEmpty else {
+                break
+            }
+
+            snapshot.lastUserPrompt = message
+            snapshot.currentTool = nil
+            snapshot.currentCommandPreview = nil
+            snapshot.phase = .running
+            snapshot.isCompleted = false
+            snapshot.summary = "Prompt: \(message)"
         case "agent_message":
             guard let message = payload["message"] as? String, !message.isEmpty else {
                 break
             }
 
             snapshot.lastAssistantMessage = message
+            snapshot.currentTool = nil
+            snapshot.currentCommandPreview = nil
             snapshot.summary = message
             snapshot.phase = .running
             snapshot.isCompleted = false
         case "task_complete":
             snapshot.currentTool = nil
+            snapshot.currentCommandPreview = nil
             snapshot.phase = .completed
             snapshot.isCompleted = true
 
@@ -521,17 +559,20 @@ public enum CodexRolloutReducer {
             }
         case "turn_aborted":
             snapshot.currentTool = nil
+            snapshot.currentCommandPreview = nil
             snapshot.phase = .completed
             snapshot.isCompleted = true
             snapshot.summary = "Codex turn was interrupted."
         case "exec_command_end":
             snapshot.currentTool = nil
+            snapshot.currentCommandPreview = nil
             if !snapshot.isCompleted {
                 snapshot.phase = .running
             }
             snapshot.summary = "Command finished."
         case "patch_apply_end":
             snapshot.currentTool = nil
+            snapshot.currentCommandPreview = nil
             if !snapshot.isCompleted {
                 snapshot.phase = .running
             }
@@ -560,6 +601,7 @@ public enum CodexRolloutReducer {
         }
 
         snapshot.currentTool = toolName
+        snapshot.currentCommandPreview = commandPreview(for: toolName, payload: payload)
         snapshot.phase = .running
         snapshot.isCompleted = false
         snapshot.summary = "Running \(displayName(for: toolName))."
@@ -575,9 +617,51 @@ public enum CodexRolloutReducer {
             "command"
         case "apply_patch":
             "patch"
+        case "write_stdin":
+            "input"
         default:
             toolName
         }
+    }
+
+    private static func commandPreview(for toolName: String, payload: [String: Any]) -> String? {
+        guard let arguments = payload["arguments"] as? String,
+              let data = arguments.data(using: .utf8),
+              let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            return nil
+        }
+
+        switch toolName {
+        case "exec_command":
+            return clipped(object["cmd"] as? String)
+        case "write_stdin":
+            return clipped(object["chars"] as? String)
+        default:
+            return nil
+        }
+    }
+
+    private static func clipped(_ value: String?, limit: Int = 110) -> String? {
+        guard let value else {
+            return nil
+        }
+
+        let collapsed = value
+            .replacingOccurrences(of: "\n", with: " ")
+            .replacingOccurrences(of: "\t", with: " ")
+            .split(separator: " ", omittingEmptySubsequences: true)
+            .joined(separator: " ")
+
+        guard !collapsed.isEmpty else {
+            return nil
+        }
+
+        guard collapsed.count > limit else {
+            return collapsed
+        }
+
+        let endIndex = collapsed.index(collapsed.startIndex, offsetBy: limit - 1)
+        return "\(collapsed[..<endIndex])…"
     }
 
     private static func jsonObject(for line: String) -> [String: Any]? {
