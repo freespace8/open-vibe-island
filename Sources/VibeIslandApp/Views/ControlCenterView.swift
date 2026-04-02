@@ -42,6 +42,7 @@ struct ControlCenterView: View {
 
                 acceptanceCard
                 setupCard
+                claudeUsageCard
                 overlayCard
 
                 VStack(alignment: .leading, spacing: 12) {
@@ -151,6 +152,65 @@ struct ControlCenterView: View {
                 }
                 .buttonStyle(.bordered)
                 .disabled(model.isCodexSetupBusy || !model.codexHooksInstalled)
+            }
+        }
+        .padding(16)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 20, style: .continuous)
+                .strokeBorder(.white.opacity(0.08))
+        )
+    }
+
+    private var claudeUsageCard: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            HStack {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("Claude Usage")
+                        .font(.headline)
+                    Text(model.claudeUsageStatusTitle)
+                        .font(.subheadline.weight(.medium))
+                    Text(model.claudeUsageStatusSummary)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+
+                Spacer(minLength: 12)
+                Circle()
+                    .fill(model.claudeUsageInstalled ? Color.mint : (model.claudeStatusLineStatus?.hasConflictingStatusLine == true ? Color.orange : Color.blue))
+                    .frame(width: 10, height: 10)
+            }
+
+            if let status = model.claudeStatusLineStatus {
+                VStack(alignment: .leading, spacing: 10) {
+                    metadataRow(title: "settings.json", value: status.settingsURL.path)
+                    metadataRow(title: "statusLine script", value: status.scriptURL.path)
+                    metadataRow(title: "rate limit cache", value: status.cacheURL.path)
+                    if let command = status.statusLineCommand {
+                        metadataRow(title: "Current command", value: command)
+                    }
+                }
+            }
+
+            HStack(spacing: 10) {
+                Button("Refresh") {
+                    model.refreshClaudeUsageState()
+                }
+                .buttonStyle(.bordered)
+                .disabled(model.isClaudeUsageSetupBusy)
+
+                Button("Install") {
+                    model.installClaudeUsageBridge()
+                }
+                .buttonStyle(.borderedProminent)
+                .disabled(model.isClaudeUsageSetupBusy || model.claudeStatusLineStatus?.hasConflictingStatusLine == true)
+
+                Button("Uninstall") {
+                    model.uninstallClaudeUsageBridge()
+                }
+                .buttonStyle(.bordered)
+                .disabled(model.isClaudeUsageSetupBusy || !model.claudeUsageInstalled)
             }
         }
         .padding(16)

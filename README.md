@@ -27,6 +27,7 @@ Current implementation status inside that boundary:
 - `Codex` is the only real adapter wired end to end today
 - `Ghostty` and `Terminal.app` are the only terminals that count as supported verification targets
 - `Claude Code` is still inside the product boundary, but does not have a real adapter yet
+- `Claude Code` now has an experimental usage bridge that can install a managed `statusLine.command`, cache `rate_limits` into `/tmp/vibe-island-rl.json`, and surface the cached 5h/7d quotas in the control center
 
 There may be partial or best-effort code paths for other terminals in the codebase. They are not part of the supported scope, are not acceptance targets, and should not drive roadmap decisions right now.
 
@@ -55,6 +56,17 @@ open Package.swift
 Open the package in Xcode to run the macOS app target. On launch, the app now restores its local cache, scans recent `~/.codex/sessions/**/rollout-*.jsonl` files for existing Codex sessions, and then starts the live bridge for new hook events.
 
 The control center now also shows live Codex hook install status from `~/.codex`, and can install or uninstall the managed hook entries directly if it can locate a local `VibeIslandHooks` executable.
+
+## Claude Usage Bridge
+
+This branch adds a narrow Claude-specific slice without pretending Claude is fully integrated yet.
+
+- The app can inspect `~/.claude/settings.json`
+- It can install a managed status line script at `~/.vibe-island/bin/vibe-island-statusline`
+- That script caches Claude Code `rate_limits` JSON into `/tmp/vibe-island-rl.json`
+- The control center reads the cached file and shows the latest 5-hour and 7-day usage percentages
+
+The installer is intentionally conservative. If `Claude Code` already has a custom `statusLine.command`, Vibe Island reports the conflict and does not overwrite it automatically.
 
 ## First Acceptance
 
