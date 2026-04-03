@@ -80,6 +80,9 @@ final class AppModel {
     private var bridgeTask: Task<Void, Never>?
 
     @ObservationIgnored
+    private var hasStarted = false
+
+    @ObservationIgnored
     private let overlayPanelController = OverlayPanelController()
 
     @ObservationIgnored
@@ -471,10 +474,14 @@ final class AppModel {
         return "Finish the setup steps in the left column, then start Codex from Terminal."
     }
 
-    func startIfNeeded() {
-        guard bridgeTask == nil else {
+    func startIfNeeded(
+        startBridge: Bool = true,
+        shouldPerformBootAnimation: Bool = true
+    ) {
+        guard !hasStarted else {
             return
         }
+        hasStarted = true
 
         restorePersistedCodexSessions()
         restorePersistedClaudeSessions()
@@ -492,7 +499,15 @@ final class AppModel {
         refreshCodexRolloutTracking()
         refreshOverlayDisplayConfiguration()
         ensureOverlayPanel()
-        performBootAnimation()
+        if shouldPerformBootAnimation {
+            performBootAnimation()
+        }
+
+        guard startBridge else {
+            isBridgeReady = false
+            lastActionMessage = "Harness mode active. Bridge startup skipped."
+            return
+        }
 
         do {
             try bridgeServer.start()

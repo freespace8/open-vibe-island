@@ -4,6 +4,7 @@ import SwiftUI
 @MainActor
 final class OpenIslandAppDelegate: NSObject, NSApplicationDelegate {
     let model = AppModel()
+    private let harnessLaunchConfiguration = HarnessLaunchConfiguration()
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         ProcessInfo.processInfo.disableAutomaticTermination(
@@ -13,8 +14,27 @@ final class OpenIslandAppDelegate: NSObject, NSApplicationDelegate {
         NSApp.setActivationPolicy(.regular)
 
         DispatchQueue.main.async { [self] in
-            model.startIfNeeded()
-            model.showControlCenter()
+            model.startIfNeeded(
+                startBridge: harnessLaunchConfiguration.shouldStartBridge,
+                shouldPerformBootAnimation: harnessLaunchConfiguration.shouldPerformBootAnimation
+            )
+
+            if let scenario = harnessLaunchConfiguration.scenario {
+                model.loadDebugSnapshot(
+                    scenario.snapshot(),
+                    presentOverlay: harnessLaunchConfiguration.presentOverlay
+                )
+            }
+
+            if harnessLaunchConfiguration.shouldShowControlCenter {
+                model.showControlCenter()
+            }
+
+            if let autoExitAfter = harnessLaunchConfiguration.autoExitAfter {
+                DispatchQueue.main.asyncAfter(deadline: .now() + autoExitAfter) {
+                    NSApp.terminate(nil)
+                }
+            }
         }
     }
 

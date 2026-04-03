@@ -67,10 +67,11 @@ The Claude bridge is intentionally conservative. It writes a managed `statusLine
 Build and run locally:
 
 ```bash
-swift test
-swift build
+zsh scripts/harness.sh
 open Package.swift
 ```
+
+The harness entrypoint lives at `scripts/harness.sh`. With no arguments it runs the current repository baseline: docs checks, `swift test`, and `swift build`.
 
 Connect Codex:
 
@@ -96,6 +97,12 @@ Check or remove the setup later:
 swift run OpenIslandSetup status
 swift run OpenIslandSetup uninstall
 ```
+
+## Repository Map
+
+- Start with [docs/index.md](docs/index.md) for the current doc map.
+- Read [docs/quality.md](docs/quality.md) for the harness contract and verification baseline.
+- Run `zsh scripts/harness.sh smoke` on macOS when you want a deterministic local app smoke pass.
 
 ## Product Direction
 
