@@ -18,7 +18,7 @@ The repository harness exists to make a round of work mechanically checkable. Th
 - `swift test` stays green for the package targets.
 - `swift build` stays green for the package products.
 - The app can be launched locally in a deterministic harness mode without requiring live hook traffic.
-- The smoke path produces a machine-readable report plus PNG evidence for the rendered window surface.
+- The smoke path produces a machine-readable report plus PNG and accessibility evidence for the rendered window surface.
 
 ## Smoke Mode
 
@@ -33,9 +33,16 @@ The smoke path is intentionally aimed at the repository executable, not `~/Appli
 - `OPEN_ISLAND_HARNESS_BOOT_ANIMATION` disables the normal boot animation for deterministic runs
 - `OPEN_ISLAND_HARNESS_CAPTURE_DELAY_SECONDS` controls when artifact capture runs after launch
 - `OPEN_ISLAND_HARNESS_AUTO_EXIT_SECONDS` terminates the app automatically after the selected duration
-- `OPEN_ISLAND_HARNESS_ARTIFACT_DIR` selects the output directory for `report.json` and PNG captures
+- `OPEN_ISLAND_HARNESS_ARTIFACT_DIR` selects the output directory for `report.json`, PNG captures, and `.ax.json` accessibility snapshots
 
 The default smoke path writes artifacts under `output/harness/`.
+
+For the default `approvalCard` smoke scenario, the harness now performs a minimal semantic check against the accessibility snapshot:
+
+- overlay artifact exists
+- notch stays open
+- active surface is an approval card
+- accessibility tree contains `Deny` plus an allow-style button label
 
 ## Evidence Expectations
 
@@ -48,5 +55,5 @@ Every meaningful round should leave behind:
 ## Current Gaps
 
 - CI does not run the GUI smoke step yet because the current baseline avoids depending on a window-server-backed runner path.
-- The harness does not yet capture screenshots, accessibility snapshots, or performance traces.
+- The harness does not yet capture performance traces, and the current accessibility assertions are still scenario-specific rather than full golden snapshots.
 - We do not yet have execution-plan lifecycle automation beyond the directory conventions defined in [docs/exec-plans/README.md](./exec-plans/README.md).

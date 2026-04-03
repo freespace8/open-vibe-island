@@ -39,5 +39,74 @@ if [[ "$png_count" -eq 0 ]]; then
     exit 1
 fi
 
+ax_count="$(find "$artifact_dir" -maxdepth 1 -name '*.ax.json' | wc -l | tr -d ' ')"
+if [[ "$ax_count" -eq 0 ]]; then
+    echo "Smoke failed: no accessibility artifacts captured in $artifact_dir" >&2
+    exit 1
+fi
+
+python3 - "$report_path" <<'PY'
+import json
+import pathlib
+import sys
+
+report_path = pathlib.Path(sys.argv[1])
+report = json.loads(report_path.read_text())
+scenario = (report.get("scenario") or "").lower()
+windows = report.get("windows") or []
+overlay = next((window for window in windows if window.get("kind") == "overlay"), None)
+
+if overlay is None:
+    raise SystemExit("Smoke failed: report is missing an overlay window artifact")
+
+accessibility_path = overlay.get("accessibilityPath")
+if not accessibility_path:
+    raise SystemExit("Smoke failed: overlay window is missing accessibilityPath")
+
+ax_path = report_path.parent / accessibility_path
+if not ax_path.exists():
+    raise SystemExit(f"Smoke failed: missing accessibility artifact at {ax_path}")
+
+ax_tree = json.loads(ax_path.read_text())
+
+labels = set()
+button_labels = set()
+
+def walk(node):
+    label = node.get("label")
+    if label:
+        labels.add(label)
+        role = (node.get("role") or "").lower()
+        if "button" in role:
+            button_labels.add(label)
+
+    value = node.get("value")
+    if isinstance(value, str) and value:
+        labels.add(value)
+
+    for child in node.get("children") or []:
+        walk(child)
+
+walk(ax_tree)
+
+notch_status = report.get("notchStatus")
+if scenario == "approvalcard":
+    if notch_status != "opened":
+        raise SystemExit(f"Smoke failed: expected opened notch for approvalCard, got {notch_status!r}")
+
+    island_surface = report.get("islandSurface") or ""
+    if not island_surface.startswith("approvalCard:"):
+        raise SystemExit(f"Smoke failed: expected approvalCard surface, got {island_surface!r}")
+
+    required_buttons = {"Deny"}
+    if not required_buttons.issubset(button_labels):
+        raise SystemExit(f"Smoke failed: missing required approval button labels {sorted(required_buttons - button_labels)}")
+
+    if not ({"Allow", "Allow Once"} & button_labels):
+        raise SystemExit("Smoke failed: missing allow-style approval button label")
+
+print(f"AX labels: {len(labels)} total, buttons: {sorted(button_labels)}")
+PY
+
 echo "Artifacts written to $artifact_dir"
 echo "OpenIslandApp smoke passed"
