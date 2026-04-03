@@ -4,27 +4,27 @@ set -euo pipefail
 
 repo_root="$(cd "$(dirname "$0")/.." && pwd)"
 build_root="$repo_root/.build/arm64-apple-macosx/release"
-app_binary="$build_root/VibeIslandApp"
-hooks_binary="$build_root/VibeIslandHooks"
-setup_binary="$build_root/VibeIslandSetup"
+app_binary="$build_root/OpenIslandApp"
+hooks_binary="$build_root/OpenIslandHooks"
+setup_binary="$build_root/OpenIslandSetup"
 brand_script="$repo_root/scripts/generate_brand_icons.py"
-brand_icon="$repo_root/Assets/Brand/VibeIsland.icns"
-bundle_dir="$HOME/Applications/Vibe Island OSS Dev.app"
+brand_icon="$repo_root/Assets/Brand/OpenIsland.icns"
+bundle_dir="$HOME/Applications/Open Island Dev.app"
 plist_path="$bundle_dir/Contents/Info.plist"
-bundle_binary="$bundle_dir/Contents/MacOS/VibeIslandApp"
+bundle_binary="$bundle_dir/Contents/MacOS/OpenIslandApp"
 
 cd "$repo_root"
 
-swift build -c release --product VibeIslandApp
-swift build -c release --product VibeIslandHooks
-swift build -c release --product VibeIslandSetup
+swift build -c release --product OpenIslandApp
+swift build -c release --product OpenIslandHooks
+swift build -c release --product OpenIslandSetup
 
 python3 "$brand_script"
 "$setup_binary" install --hooks-binary "$hooks_binary"
 
 mkdir -p "$bundle_dir/Contents/MacOS" "$bundle_dir/Contents/Resources"
 cp "$app_binary" "$bundle_binary"
-cp "$brand_icon" "$bundle_dir/Contents/Resources/VibeIsland.icns"
+cp "$brand_icon" "$bundle_dir/Contents/Resources/OpenIsland.icns"
 chmod +x "$bundle_binary"
 
 cat > "$plist_path" <<EOF
@@ -35,15 +35,15 @@ cat > "$plist_path" <<EOF
     <key>CFBundleDevelopmentRegion</key>
     <string>en</string>
     <key>CFBundleExecutable</key>
-    <string>VibeIslandApp</string>
+    <string>OpenIslandApp</string>
     <key>CFBundleIdentifier</key>
-    <string>app.vibeisland.oss.dev</string>
+    <string>app.openisland.dev</string>
     <key>CFBundleInfoDictionaryVersion</key>
     <string>6.0</string>
     <key>CFBundleIconFile</key>
-    <string>VibeIsland</string>
+    <string>OpenIsland</string>
     <key>CFBundleName</key>
-    <string>Vibe Island OSS Dev</string>
+    <string>Open Island Dev</string>
     <key>CFBundlePackageType</key>
     <string>APPL</string>
     <key>CFBundleShortVersionString</key>
@@ -52,7 +52,7 @@ cat > "$plist_path" <<EOF
     <string>1</string>
     <key>LSEnvironment</key>
     <dict>
-        <key>VIBE_ISLAND_HOOKS_BINARY</key>
+        <key>OPEN_ISLAND_HOOKS_BINARY</key>
         <string>$hooks_binary</string>
     </dict>
     <key>LSMinimumSystemVersion</key>

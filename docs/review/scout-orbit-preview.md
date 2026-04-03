@@ -1,6 +1,6 @@
 # Scout Orbit Preview
 
-Open [scout-orbit-preview.html](/Users/wangruobing/Personal/vibe-island/docs/review/scout-orbit-preview.html) to review the focused `Scout + Orbit` animation.
+Open [scout-orbit-preview.html](/Users/wangruobing/Personal/open-island/docs/review/scout-orbit-preview.html) to review the focused `Scout + Orbit` animation.
 
 This file is narrower than the full motion matrix:
 

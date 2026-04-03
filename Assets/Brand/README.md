@@ -7,7 +7,7 @@ Generation workflow:
 - regenerate everything with `python3 scripts/generate_brand_icons.py`
 - the script outputs:
   - `AppIcon.appiconset/` for future asset-catalog use
-  - `VibeIsland.iconset/` and `VibeIsland.icns` for manual macOS bundle packaging
+  - `OpenIsland.iconset/` and `OpenIsland.icns` for manual macOS bundle packaging
   - `Internal/color/` for in-app colored usage
   - `Internal/template/` for monochrome template-style usage
   - `Internal/badge/` for small boxed icon treatments

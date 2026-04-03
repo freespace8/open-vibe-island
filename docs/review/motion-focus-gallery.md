@@ -1,6 +1,6 @@
 # Motion Focus Gallery
 
-Open [motion-focus-gallery.html](/Users/wangruobing/Personal/vibe-island/docs/review/motion-focus-gallery.html) to review all `9` motion combinations in a larger format.
+Open [motion-focus-gallery.html](/Users/wangruobing/Personal/open-island/docs/review/motion-focus-gallery.html) to review all `9` motion combinations in a larger format.
 
 This page is for side-by-side comparison after the smaller matrix review:
 

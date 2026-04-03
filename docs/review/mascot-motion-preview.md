@@ -1,6 +1,6 @@
 # Mascot Motion Preview
 
-Open [mascot-motion-preview.html](/Users/wangruobing/Personal/vibe-island/docs/review/mascot-motion-preview.html) to review the live animation version.
+Open [mascot-motion-preview.html](/Users/wangruobing/Personal/open-island/docs/review/mascot-motion-preview.html) to review the live animation version.
 
 Format recommendation:
 

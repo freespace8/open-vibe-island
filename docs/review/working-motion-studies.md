@@ -1,6 +1,6 @@
 # Working Motion Studies
 
-Open [working-motion-studies.html](/Users/wangruobing/Personal/vibe-island/docs/review/working-motion-studies.html) to review the quieter working-state alternatives.
+Open [working-motion-studies.html](/Users/wangruobing/Personal/open-island/docs/review/working-motion-studies.html) to review the quieter working-state alternatives.
 
 This page is intentionally a stress test for "not just another spinner":
 

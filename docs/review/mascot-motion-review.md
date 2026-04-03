@@ -1,6 +1,6 @@
 # Mascot Motion Review
 
-Open [mascot-motion-concepts.svg](/Users/wangruobing/Personal/vibe-island/docs/review/mascot-motion-concepts.svg) to review the motion options.
+Open [mascot-motion-concepts.svg](/Users/wangruobing/Personal/open-island/docs/review/mascot-motion-concepts.svg) to review the motion options.
 
 This file is separate from the existing static mascot review. It compares:
 

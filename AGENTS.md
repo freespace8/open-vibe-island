@@ -40,11 +40,11 @@ Keep all work incremental, reviewable, and reversible. Every meaningful round of
 
 ## Parallel Worktree Rules
 
-- Treat `/Users/wangruobing/Personal/vibe-island` on `main` as the shared integration worktree.
+- Treat `/Users/wangruobing/Personal/open-island` on `main` as the shared integration worktree.
 - Do not do day-to-day feature development directly on the shared `main` worktree when parallel work is active.
 - Create one worktree per branch and one branch per worktree. Never attach two worktrees to the same branch.
 - Create new worktrees from `origin/main`, not from a locally drifted feature branch.
-- Use sibling worktree paths named like `/Users/wangruobing/Personal/vibe-island-<topic>`.
+- Use sibling worktree paths named like `/Users/wangruobing/Personal/open-island-<topic>`.
 - Use branch names that match the workstream, such as `feat/<topic>`, `fix/<topic>`, `docs/<topic>`, or `investigate/<topic>`.
 - Keep each worktree focused on one coherent slice with a narrow file ownership area when possible.
 - Rebase or merge the latest `origin/main` into the feature branch before integrating it back.
@@ -52,7 +52,7 @@ Keep all work incremental, reviewable, and reversible. Every meaningful round of
 - Remove merged worktrees and delete merged branches after the integration round is complete.
 - If multiple agents are working in parallel, assign each agent its own worktree instead of sharing one checkout.
 
-See [docs/worktree-workflow.md](/Users/wangruobing/Personal/vibe-island/docs/worktree-workflow.md) for the concrete commands and lifecycle.
+See [docs/worktree-workflow.md](/Users/wangruobing/Personal/open-island/docs/worktree-workflow.md) for the concrete commands and lifecycle.
 
 ## Reproduction Scope
 
@@ -73,7 +73,7 @@ See [docs/worktree-workflow.md](/Users/wangruobing/Personal/vibe-island/docs/wor
   - separate compact closed state from expanded actionable state instead of treating the island as one always-expanded panel
   - keep hook installation and Unix-socket request/response loops explicit and local-first
   - enrich live session state from transcript or history parsing when hooks alone are too shallow
-- Do not treat `claude-island` as a product spec. It is a reference implementation, not the source of truth for Vibe Island.
+- Do not treat `claude-island` as a product spec. It is a reference implementation, not the source of truth for Open Island.
 - Unless the user explicitly asks, do not import or prioritize these `claude-island` choices into this repository:
   - Mixpanel or other analytics
   - `tmux`, `yabai`, or window-manager-specific scope expansion

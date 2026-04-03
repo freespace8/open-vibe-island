@@ -36,7 +36,7 @@ Each event should carry a stable session identifier, tool name, timestamps, and 
 The current bridge server still lives inside the app process for convenience, but the transport boundary is now real:
 
 1. Codex runs in the user’s existing terminal session.
-2. Codex invokes a repo-built `VibeIslandHooks` helper from `hooks.json`.
+2. Codex invokes a repo-built `OpenIslandHooks` helper from `hooks.json`.
 3. The helper forwards hook payloads to the app bridge over a Unix socket.
 4. The app consumes normalized `AgentEvent` values from that socket. The same bridge can also carry approval commands back to hook processes when an adapter opts into interactive hooks.
 5. A separate setup CLI owns `config.toml` and `hooks.json` edits so installation and rollback stay explicit and reversible.

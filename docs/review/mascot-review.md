@@ -1,6 +1,6 @@
 # Mascot Review
 
-Open [mascot-concepts.svg](/Users/wangruobing/Personal/vibe-island/docs/review/mascot-concepts.svg) to review the current direction set.
+Open [mascot-concepts.svg](/Users/wangruobing/Personal/open-island/docs/review/mascot-concepts.svg) to review the current direction set.
 
 This sheet is intentionally separate from the app UI. It is only for choosing the mascot style before wiring anything back into the product.
 

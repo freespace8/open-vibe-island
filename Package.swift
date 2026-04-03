@@ -3,51 +3,51 @@
 import PackageDescription
 
 let package = Package(
-    name: "VibeIsland",
+    name: "OpenIsland",
     platforms: [
         .macOS(.v14),
     ],
     products: [
         .library(
-            name: "VibeIslandCore",
-            targets: ["VibeIslandCore"]
+            name: "OpenIslandCore",
+            targets: ["OpenIslandCore"]
         ),
         .executable(
-            name: "VibeIslandHooks",
-            targets: ["VibeIslandHooks"]
+            name: "OpenIslandHooks",
+            targets: ["OpenIslandHooks"]
         ),
         .executable(
-            name: "VibeIslandSetup",
-            targets: ["VibeIslandSetup"]
+            name: "OpenIslandSetup",
+            targets: ["OpenIslandSetup"]
         ),
         .executable(
-            name: "VibeIslandApp",
-            targets: ["VibeIslandApp"]
+            name: "OpenIslandApp",
+            targets: ["OpenIslandApp"]
         ),
     ],
     targets: [
         .target(
-            name: "VibeIslandCore"
+            name: "OpenIslandCore"
         ),
         .executableTarget(
-            name: "VibeIslandHooks",
-            dependencies: ["VibeIslandCore"]
+            name: "OpenIslandHooks",
+            dependencies: ["OpenIslandCore"]
         ),
         .executableTarget(
-            name: "VibeIslandSetup",
-            dependencies: ["VibeIslandCore"]
+            name: "OpenIslandSetup",
+            dependencies: ["OpenIslandCore"]
         ),
         .executableTarget(
-            name: "VibeIslandApp",
-            dependencies: ["VibeIslandCore"]
+            name: "OpenIslandApp",
+            dependencies: ["OpenIslandCore"]
         ),
         .testTarget(
-            name: "VibeIslandCoreTests",
-            dependencies: ["VibeIslandCore"]
+            name: "OpenIslandCoreTests",
+            dependencies: ["OpenIslandCore"]
         ),
         .testTarget(
-            name: "VibeIslandAppTests",
-            dependencies: ["VibeIslandApp", "VibeIslandCore"]
+            name: "OpenIslandAppTests",
+            dependencies: ["OpenIslandApp", "OpenIslandCore"]
         ),
     ]
 )

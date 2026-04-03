@@ -1,0 +1,1774 @@
+import AppKit
+import Foundation
+import Observation
+import OpenIslandCore
+
+enum NotchStatus: Equatable {
+    case closed
+    case opened
+    case popping
+}
+
+enum NotchOpenReason: Equatable {
+    case click
+    case hover
+    case notification
+    case boot
+}
+
+@MainActor
+@Observable
+final class AppModel {
+    private static let overlayDisplayPreferenceDefaultsKey = "overlay.display.preference"
+    private static let soundMutedDefaultsKey = "overlay.sound.muted"
+    private static let syntheticClaudeSessionPrefix = "claude-process:"
+    private static let liveSessionStalenessWindow: TimeInterval = 15 * 60
+    private static let notificationSurfaceAutoCollapseDelay: TimeInterval = 10
+    static let hoverOpenDelay: TimeInterval = 0.7
+    typealias ActiveProcessSnapshot = ActiveAgentProcessDiscovery.ProcessSnapshot
+
+    struct AcceptanceStep: Identifiable {
+        let id: String
+        let title: String
+        let detail: String
+        let isComplete: Bool
+    }
+
+    var state = SessionState()
+    var selectedSessionID: String?
+    var notchStatus: NotchStatus = .closed
+    var notchOpenReason: NotchOpenReason?
+    var islandSurface: IslandSurface = .sessionList
+    var isOverlayVisible: Bool { notchStatus != .closed }
+    var isCodexSetupBusy = false
+    var isClaudeHookSetupBusy = false
+    var isClaudeUsageSetupBusy = false
+    var isBridgeReady = false
+    var lastActionMessage = "Waiting for agent hook events..."
+    var codexHookStatus: CodexHookInstallationStatus?
+    var claudeHookStatus: ClaudeHookInstallationStatus?
+    var claudeStatusLineStatus: ClaudeStatusLineInstallationStatus?
+    var claudeUsageSnapshot: ClaudeUsageSnapshot?
+    var codexUsageSnapshot: CodexUsageSnapshot?
+    var hooksBinaryURL: URL?
+    var overlayDisplayOptions: [OverlayDisplayOption] = []
+    var overlayPlacementDiagnostics: OverlayPlacementDiagnostics?
+    var isSoundMuted = false {
+        didSet {
+            guard isSoundMuted != oldValue else {
+                return
+            }
+
+            UserDefaults.standard.set(isSoundMuted, forKey: Self.soundMutedDefaultsKey)
+            lastActionMessage = isSoundMuted
+                ? "Island sound notifications muted."
+                : "Island sound notifications enabled."
+        }
+    }
+    var overlayDisplaySelectionID = OverlayDisplayOption.automaticID {
+        didSet {
+            guard overlayDisplaySelectionID != oldValue else {
+                return
+            }
+
+            persistOverlayDisplayPreference()
+            refreshOverlayPlacement()
+        }
+    }
+
+    @ObservationIgnored
+    private var bridgeTask: Task<Void, Never>?
+
+    @ObservationIgnored
+    private let overlayPanelController = OverlayPanelController()
+
+    @ObservationIgnored
+    private let bridgeServer = DemoBridgeServer()
+
+    @ObservationIgnored
+    private let bridgeClient = LocalBridgeClient()
+
+    @ObservationIgnored
+    private let codexHookInstallationManager = CodexHookInstallationManager()
+
+    @ObservationIgnored
+    private let claudeHookInstallationManager = ClaudeHookInstallationManager()
+
+    @ObservationIgnored
+    private let claudeStatusLineInstallationManager = ClaudeStatusLineInstallationManager()
+
+    @ObservationIgnored
+    private let terminalJumpService = TerminalJumpService()
+
+    @ObservationIgnored
+    private let codexSessionStore = CodexSessionStore()
+
+    @ObservationIgnored
+    private let claudeSessionRegistry = ClaudeSessionRegistry()
+
+    @ObservationIgnored
+    private let codexRolloutWatcher = CodexRolloutWatcher()
+
+    @ObservationIgnored
+    private let codexRolloutDiscovery = CodexRolloutDiscovery()
+
+    @ObservationIgnored
+    private let claudeTranscriptDiscovery = ClaudeTranscriptDiscovery()
+
+    @ObservationIgnored
+    private let terminalSessionAttachmentProbe = TerminalSessionAttachmentProbe()
+
+    @ObservationIgnored
+    private let activeAgentProcessDiscovery = ActiveAgentProcessDiscovery()
+
+    @ObservationIgnored
+    private var codexSessionPersistenceTask: Task<Void, Never>?
+
+    @ObservationIgnored
+    private var claudeSessionPersistenceTask: Task<Void, Never>?
+
+    @ObservationIgnored
+    private var sessionAttachmentMonitorTask: Task<Void, Never>?
+
+    @ObservationIgnored
+    private var claudeUsageMonitorTask: Task<Void, Never>?
+
+    @ObservationIgnored
+    private var notificationAutoCollapseTask: Task<Void, Never>?
+
+    @ObservationIgnored
+    private var autoCollapseSurfaceHasBeenEntered = false
+
+    @ObservationIgnored
+    private var codexUsageMonitorTask: Task<Void, Never>?
+
+    init() {
+        overlayDisplaySelectionID = UserDefaults.standard.string(
+            forKey: Self.overlayDisplayPreferenceDefaultsKey
+        ) ?? OverlayDisplayOption.automaticID
+        isSoundMuted = UserDefaults.standard.bool(forKey: Self.soundMutedDefaultsKey)
+
+        codexRolloutWatcher.eventHandler = { [weak self] event in
+            Task { @MainActor [weak self] in
+                self?.applyTrackedEvent(event, updateLastActionMessage: false)
+            }
+        }
+
+        refreshOverlayDisplayConfiguration()
+    }
+
+    var sessions: [AgentSession] {
+        state.sessions
+    }
+
+    var surfacedSessions: [AgentSession] {
+        sessionBuckets.primary
+    }
+
+    var recentSessions: [AgentSession] {
+        sessionBuckets.overflow
+    }
+
+    var islandListSessions: [AgentSession] {
+        surfacedSessions
+    }
+
+    var recentSessionCount: Int {
+        recentSessions.count
+    }
+
+    var liveSessionCount: Int {
+        state.liveSessionCount
+    }
+
+    var liveAttentionCount: Int {
+        state.liveAttentionCount
+    }
+
+    var liveRunningCount: Int {
+        state.liveRunningCount
+    }
+
+    var codexHooksInstalled: Bool {
+        codexHookStatus?.managedHooksPresent == true
+    }
+
+    var claudeHooksInstalled: Bool {
+        claudeHookStatus?.managedHooksPresent == true
+    }
+
+    var claudeUsageInstalled: Bool {
+        claudeStatusLineStatus?.managedStatusLineInstalled == true
+    }
+
+    var claudeHookStatusTitle: String {
+        if claudeHooksInstalled {
+            return "Claude hooks installed"
+        }
+
+        if hooksBinaryURL == nil {
+            return "Hook binary not found"
+        }
+
+        return "Claude hooks not installed"
+    }
+
+    var claudeHookStatusSummary: String {
+        guard let status = claudeHookStatus else {
+            return "Reading ~/.claude/settings.json."
+        }
+
+        if claudeHooksInstalled {
+            if status.hasClaudeIslandHooks {
+                return "managed hooks present · claude-island hooks also detected"
+            }
+            return "managed hooks present"
+        }
+
+        if hooksBinaryURL == nil {
+            return "Build OpenIslandHooks before installing."
+        }
+
+        if status.hasClaudeIslandHooks {
+            return "claude-island hooks detected · managed hooks absent"
+        }
+
+        return "no managed Claude hooks"
+    }
+
+    var claudeUsageStatusTitle: String {
+        guard let status = claudeStatusLineStatus else {
+            return "Claude usage status unavailable"
+        }
+
+        if status.managedStatusLineInstalled {
+            return "Claude usage bridge installed"
+        }
+
+        if status.hasConflictingStatusLine {
+            return "Custom Claude status line detected"
+        }
+
+        return "Claude usage bridge not installed"
+    }
+
+    var claudeUsageStatusSummary: String {
+        guard let status = claudeStatusLineStatus else {
+            return "Reading ~/.claude/settings.json."
+        }
+
+        if status.managedStatusLineInstalled {
+            if let summary = claudeUsageSummaryText {
+                return "Caching rate limits from Claude Code · \(summary)"
+            }
+            return "Caching rate limits from Claude Code into \(status.cacheURL.path)."
+        }
+
+        if status.hasConflictingStatusLine {
+            return "Open Island will not overwrite an existing Claude status line automatically."
+        }
+
+        return "Install a managed Claude status line to cache 5h and 7d usage locally."
+    }
+
+    var claudeUsageSummaryText: String? {
+        guard let snapshot = claudeUsageSnapshot else {
+            return nil
+        }
+
+        var components: [String] = []
+        if let fiveHour = snapshot.fiveHour {
+            components.append("5h \(fiveHour.roundedUsedPercentage)%")
+        }
+        if let sevenDay = snapshot.sevenDay {
+            components.append("7d \(sevenDay.roundedUsedPercentage)%")
+        }
+        if let cachedAt = snapshot.cachedAt {
+            components.append("updated \(relativeTimestampFormatter.localizedString(for: cachedAt, relativeTo: .now))")
+        }
+        return components.isEmpty ? nil : components.joined(separator: " · ")
+    }
+
+    var codexUsageStatusTitle: String {
+        if codexUsageSnapshot?.isEmpty == false {
+            return "Codex rate limits detected"
+        }
+
+        return "Waiting for Codex rate limits"
+    }
+
+    var codexUsageStatusSummary: String {
+        if let summary = codexUsageSummaryText {
+            return "Reading the latest local rollout token_count snapshots · \(summary)"
+        }
+
+        return "Passively reading ~/.codex/sessions/**/rollout-*.jsonl and extracting token_count.rate_limits."
+    }
+
+    var codexUsageSummaryText: String? {
+        guard let snapshot = codexUsageSnapshot else {
+            return nil
+        }
+
+        var components = snapshot.windows.map { window in
+            "\(window.label) \(window.roundedUsedPercentage)%"
+        }
+
+        if let planType = snapshot.planType {
+            components.append("plan \(planType)")
+        }
+
+        if let capturedAt = snapshot.capturedAt {
+            components.append("updated \(relativeTimestampFormatter.localizedString(for: capturedAt, relativeTo: .now))")
+        }
+
+        return components.isEmpty ? nil : components.joined(separator: " · ")
+    }
+
+    var codexHookStatusTitle: String {
+        if codexHooksInstalled {
+            return "Codex hooks installed"
+        }
+
+        if hooksBinaryURL == nil {
+            return "Hook binary not found"
+        }
+
+        return "Codex hooks not installed"
+    }
+
+    var codexHookStatusSummary: String {
+        guard let status = codexHookStatus else {
+            return "Reading ~/.codex state."
+        }
+
+        if codexHooksInstalled {
+            let featureText = status.featureFlagEnabled ? "feature on" : "feature off"
+            return "\(featureText) · managed hooks present"
+        }
+
+        if hooksBinaryURL == nil {
+            return "Build OpenIslandHooks before installing."
+        }
+
+        return status.featureFlagEnabled ? "feature on · no managed hooks" : "feature off · no managed hooks"
+    }
+
+    var focusedSession: AgentSession? {
+        state.session(id: selectedSessionID) ?? surfacedSessions.first ?? state.activeActionableSession ?? state.sessions.first
+    }
+
+    var activeIslandCardSession: AgentSession? {
+        guard let sessionID = islandSurface.sessionID else {
+            return nil
+        }
+
+        return state.session(id: sessionID)
+    }
+
+    var showsNotificationCard: Bool {
+        islandSurface.isNotificationCard
+    }
+
+    var shouldAutoCollapseOnMouseLeave: Bool {
+        guard notchStatus == .opened else {
+            return false
+        }
+
+        if notchOpenReason == .hover && islandSurface == .sessionList {
+            return true
+        }
+
+        return notchOpenReason == .notification
+            && islandSurface.autoDismissesWhenPresentedAsNotification
+    }
+
+    private var autoCollapseOnMouseLeaveRequiresPriorSurfaceEntry: Bool {
+        notchOpenReason == .notification
+            && islandSurface.autoDismissesWhenPresentedAsNotification
+    }
+
+    var hasAnySession: Bool {
+        !sessions.isEmpty
+    }
+
+    var hasCodexSession: Bool {
+        sessions.contains(where: { $0.tool == .codex })
+    }
+
+    var hasJumpableSession: Bool {
+        sessions.contains(where: { $0.jumpTarget != nil })
+    }
+
+    var acceptanceSteps: [AcceptanceStep] {
+        [
+            AcceptanceStep(
+                id: "bridge",
+                title: "Bridge ready",
+                detail: "The app must own the local socket and register as a bridge observer.",
+                isComplete: isBridgeReady
+            ),
+            AcceptanceStep(
+                id: "hooks",
+                title: "Codex hooks installed",
+                detail: "Managed `hooks.json` entries should be present in `~/.codex`.",
+                isComplete: codexHooksInstalled
+            ),
+            AcceptanceStep(
+                id: "overlay",
+                title: "Island visible",
+                detail: "Show the overlay at least once so the notch/top-bar surface is visible.",
+                isComplete: isOverlayVisible
+            ),
+            AcceptanceStep(
+                id: "session",
+                title: "A Codex session is observed",
+                detail: "Start Codex in Terminal and wait for the first session row to appear.",
+                isComplete: hasCodexSession
+            ),
+            AcceptanceStep(
+                id: "jump",
+                title: "Jump target captured",
+                detail: "At least one session should include terminal jump metadata.",
+                isComplete: hasJumpableSession
+            ),
+        ]
+    }
+
+    var acceptanceCompletedCount: Int {
+        acceptanceSteps.filter(\.isComplete).count
+    }
+
+    var isReadyForFirstAcceptance: Bool {
+        acceptanceSteps.prefix(3).allSatisfy(\.isComplete)
+    }
+
+    var hasPassedAcceptanceFlow: Bool {
+        acceptanceSteps.allSatisfy(\.isComplete)
+    }
+
+    var acceptanceStatusTitle: String {
+        if hasPassedAcceptanceFlow {
+            return "v0.1 acceptance passed"
+        }
+
+        if isReadyForFirstAcceptance {
+            return "Ready for v0.1 acceptance"
+        }
+
+        return "v0.1 acceptance not ready"
+    }
+
+    var acceptanceStatusSummary: String {
+        if hasPassedAcceptanceFlow {
+            return "The current build has completed the first-run checklist end to end."
+        }
+
+        if isReadyForFirstAcceptance {
+            return "You can start your first acceptance run now. Launch Codex in Terminal and walk the last two steps."
+        }
+
+        return "Finish the setup steps in the left column, then start Codex from Terminal."
+    }
+
+    func startIfNeeded() {
+        guard bridgeTask == nil else {
+            return
+        }
+
+        restorePersistedCodexSessions()
+        restorePersistedClaudeSessions()
+        discoverRecentCodexSessions()
+        discoverRecentClaudeSessions()
+        reconcileSessionAttachments()
+        startSessionAttachmentMonitoringIfNeeded()
+        hooksBinaryURL = HooksBinaryLocator.locate()
+        refreshCodexHookStatus()
+        refreshClaudeHookStatus()
+        refreshClaudeUsageState()
+        startClaudeUsageMonitoringIfNeeded()
+        refreshCodexUsageState()
+        startCodexUsageMonitoringIfNeeded()
+        refreshCodexRolloutTracking()
+        refreshOverlayDisplayConfiguration()
+        ensureOverlayPanel()
+        performBootAnimation()
+
+        do {
+            try bridgeServer.start()
+            let stream = try bridgeClient.connect()
+
+            Task { [weak self] in
+                guard let self else {
+                    return
+                }
+
+                do {
+                    try await self.bridgeClient.send(.registerClient(role: .observer))
+                    self.isBridgeReady = true
+                    self.lastActionMessage = "Bridge ready. Waiting for Claude and Codex hook events."
+                } catch {
+                    self.isBridgeReady = false
+                    self.lastActionMessage = "Failed to register bridge observer: \(error.localizedDescription)"
+                }
+            }
+
+            bridgeTask = Task { [weak self] in
+                guard let self else {
+                    return
+                }
+
+                do {
+                    for try await event in stream {
+                        self.applyTrackedEvent(event)
+                    }
+                } catch {
+                    self.isBridgeReady = false
+                    self.lastActionMessage = "Bridge disconnected: \(error.localizedDescription)"
+                }
+            }
+        } catch {
+            isBridgeReady = false
+            lastActionMessage = "Failed to start local bridge: \(error.localizedDescription)"
+        }
+    }
+
+    func select(sessionID: String) {
+        selectedSessionID = sessionID
+    }
+
+    func toggleOverlay() {
+        if notchStatus == .closed {
+            notchOpen(reason: .click)
+        } else {
+            notchClose()
+        }
+    }
+
+    func notchOpen(reason: NotchOpenReason, surface: IslandSurface = .sessionList) {
+        islandSurface = surface
+        notchOpenReason = reason
+        notchStatus = .opened
+        autoCollapseSurfaceHasBeenEntered = false
+        updateNotificationAutoCollapse()
+
+        overlayPlacementDiagnostics = overlayPanelController.show(
+            model: self,
+            preferredScreenID: preferredOverlayScreenID
+        )
+        overlayPanelController.setInteractive(true)
+
+        if let overlayPlacementDiagnostics {
+            lastActionMessage = "Overlay showing on \(overlayPlacementDiagnostics.targetScreenName) as \(overlayPlacementDiagnostics.modeDescription.lowercased())."
+        }
+    }
+
+    func notchClose() {
+        notchStatus = .closed
+        notchOpenReason = nil
+        islandSurface = .sessionList
+        autoCollapseSurfaceHasBeenEntered = false
+        notificationAutoCollapseTask?.cancel()
+        notificationAutoCollapseTask = nil
+        overlayPanelController.setInteractive(false)
+        refreshOverlayPlacement()
+    }
+
+    func notchPop() {
+        guard notchStatus == .closed else { return }
+        islandSurface = .sessionList
+        notchStatus = .popping
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { [weak self] in
+            guard self?.notchStatus == .popping else { return }
+            self?.notchStatus = .closed
+        }
+    }
+
+    func performBootAnimation() {
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
+            guard let self else { return }
+            self.notchOpen(reason: .boot, surface: .sessionList)
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { [weak self] in
+                guard self?.notchOpenReason == .boot else { return }
+                self?.notchClose()
+            }
+        }
+    }
+
+    func ensureOverlayPanel() {
+        overlayPanelController.ensurePanel(model: self, preferredScreenID: preferredOverlayScreenID)
+    }
+
+    // Legacy compatibility
+    func showOverlay() { notchOpen(reason: .click, surface: .sessionList) }
+    func hideOverlay() { notchClose() }
+
+    func refreshOverlayDisplayConfiguration() {
+        overlayDisplayOptions = overlayPanelController.availableDisplayOptions()
+
+        let validSelectionIDs = Set(overlayDisplayOptions.map(\.id))
+        if !validSelectionIDs.contains(overlayDisplaySelectionID) {
+            overlayDisplaySelectionID = OverlayDisplayOption.automaticID
+            return
+        }
+
+        refreshOverlayPlacement()
+    }
+
+    func refreshOverlayPlacement() {
+        overlayPlacementDiagnostics = overlayPanelController.reposition(
+            preferredScreenID: preferredOverlayScreenID
+        )
+    }
+
+    private func refreshOverlayPlacementIfVisible() {
+        guard notchStatus == .opened else {
+            return
+        }
+
+        refreshOverlayPlacement()
+    }
+
+    func showControlCenter() {
+        guard let window = NSApp.windows.first(where: { $0.title == "Open Island Debug" }) else {
+            NSApp.activate(ignoringOtherApps: true)
+            return
+        }
+
+        window.orderFrontRegardless()
+        window.makeKey()
+        NSApp.activate(ignoringOtherApps: true)
+    }
+
+    func toggleSoundMuted() {
+        isSoundMuted.toggle()
+    }
+
+    func loadDebugSnapshot(
+        _ snapshot: IslandDebugSnapshot,
+        presentOverlay: Bool = false,
+        autoCollapseNotificationCards: Bool = false
+    ) {
+        notificationAutoCollapseTask?.cancel()
+        notificationAutoCollapseTask = nil
+        autoCollapseSurfaceHasBeenEntered = false
+
+        state = SessionState(sessions: snapshot.sessions)
+        selectedSessionID = snapshot.selectedSessionID ?? snapshot.sessions.first?.id
+        islandSurface = snapshot.islandSurface
+        notchStatus = snapshot.notchStatus
+        notchOpenReason = snapshot.notchOpenReason
+        lastActionMessage = "Loaded debug scenario: \(snapshot.title)."
+
+        if autoCollapseNotificationCards {
+            updateNotificationAutoCollapse()
+        }
+
+        guard presentOverlay else {
+            return
+        }
+
+        switch snapshot.notchStatus {
+        case .opened:
+            overlayPlacementDiagnostics = overlayPanelController.show(
+                model: self,
+                preferredScreenID: preferredOverlayScreenID
+            )
+            overlayPanelController.setInteractive(true)
+        case .closed, .popping:
+            overlayPanelController.setInteractive(false)
+            refreshOverlayPlacement()
+        }
+    }
+
+    func notePointerInsideIslandSurface() {
+        guard shouldAutoCollapseOnMouseLeave else {
+            return
+        }
+
+        autoCollapseSurfaceHasBeenEntered = true
+    }
+
+    func handlePointerExitedIslandSurface() {
+        guard shouldAutoCollapseOnMouseLeave else {
+            return
+        }
+
+        guard !autoCollapseOnMouseLeaveRequiresPriorSurfaceEntry
+                || autoCollapseSurfaceHasBeenEntered else {
+            return
+        }
+
+        notchClose()
+    }
+
+    func approveFocusedPermission(_ approved: Bool) {
+        guard let session = focusedSession else {
+            return
+        }
+
+        send(
+            .resolvePermission(sessionID: session.id, resolution: permissionResolution(for: approved)),
+            userMessage: approved
+                ? "Approving permission for \(session.title)."
+                : "Denying permission for \(session.title)."
+        )
+    }
+
+    func answerFocusedQuestion(_ answer: String) {
+        guard let session = focusedSession else {
+            return
+        }
+
+        send(
+            .answerQuestion(sessionID: session.id, response: QuestionPromptResponse(answer: answer)),
+            userMessage: "Sending answer \"\(answer)\" for \(session.title)."
+        )
+    }
+
+    func jumpToFocusedSession() {
+        guard let session = focusedSession, let jumpTarget = session.jumpTarget else {
+            lastActionMessage = "No jump target is available yet."
+            return
+        }
+
+        do {
+            dismissOverlayForJump()
+            let result = try terminalJumpService.jump(to: jumpTarget)
+            lastActionMessage = result
+        } catch {
+            lastActionMessage = "Jump failed: \(error.localizedDescription)"
+        }
+    }
+
+    func jumpToSession(_ session: AgentSession) {
+        guard let jumpTarget = session.jumpTarget else {
+            lastActionMessage = "No jump target is available yet."
+            return
+        }
+
+        do {
+            dismissOverlayForJump()
+            let result = try terminalJumpService.jump(to: jumpTarget)
+            lastActionMessage = result
+        } catch {
+            lastActionMessage = "Jump failed: \(error.localizedDescription)"
+        }
+    }
+
+    func approvePermission(for sessionID: String, approved: Bool) {
+        guard let session = state.session(id: sessionID) else {
+            return
+        }
+
+        let resolution = permissionResolution(for: approved)
+        dismissNotificationSurfaceIfPresent(for: sessionID)
+        state.resolvePermission(sessionID: session.id, resolution: resolution)
+        synchronizeSelection()
+        refreshOverlayPlacementIfVisible()
+
+        send(
+            .resolvePermission(sessionID: session.id, resolution: resolution),
+            userMessage: approved
+                ? "Approving permission for \(session.title)."
+                : "Denying permission for \(session.title)."
+        )
+    }
+
+    func answerQuestion(for sessionID: String, answer: QuestionPromptResponse) {
+        guard let session = state.session(id: sessionID) else {
+            return
+        }
+
+        dismissNotificationSurfaceIfPresent(for: sessionID)
+        state.answerQuestion(sessionID: session.id, response: answer)
+        synchronizeSelection()
+        refreshOverlayPlacementIfVisible()
+
+        send(
+            .answerQuestion(sessionID: session.id, response: answer),
+            userMessage: "Sending answer for \(session.title)."
+        )
+    }
+
+    func refreshCodexHookStatus() {
+        Task { [weak self] in
+            guard let self else {
+                return
+            }
+
+            do {
+                let status = try self.codexHookInstallationManager.status(hooksBinaryURL: self.hooksBinaryURL)
+                self.codexHookStatus = status
+            } catch {
+                self.lastActionMessage = "Failed to read Codex hook status: \(error.localizedDescription)"
+            }
+        }
+    }
+
+    func refreshClaudeHookStatus() {
+        Task { [weak self] in
+            guard let self else {
+                return
+            }
+
+            do {
+                let status = try self.claudeHookInstallationManager.status(hooksBinaryURL: self.hooksBinaryURL)
+                self.claudeHookStatus = status
+            } catch {
+                self.lastActionMessage = "Failed to read Claude hook status: \(error.localizedDescription)"
+            }
+        }
+    }
+
+    func refreshClaudeUsageState() {
+        Task { [weak self] in
+            guard let self else {
+                return
+            }
+
+            do {
+                self.claudeStatusLineStatus = try self.claudeStatusLineInstallationManager.status()
+                self.claudeUsageSnapshot = try ClaudeUsageLoader.load()
+            } catch {
+                self.lastActionMessage = "Failed to read Claude usage state: \(error.localizedDescription)"
+            }
+        }
+    }
+
+    func refreshCodexUsageState() {
+        Task { [weak self] in
+            guard let self else {
+                return
+            }
+
+            do {
+                let snapshot = try await Task.detached(priority: .utility) {
+                    try CodexUsageLoader.load()
+                }.value
+                self.codexUsageSnapshot = snapshot
+            } catch {
+                self.lastActionMessage = "Failed to read Codex usage state: \(error.localizedDescription)"
+            }
+        }
+    }
+
+    func installCodexHooks() {
+        guard let hooksBinaryURL else {
+            lastActionMessage = "Could not find a local OpenIslandHooks binary. Build the package first."
+            return
+        }
+
+        updateCodexHooks(userMessage: "Installing Codex hooks.") { manager in
+            try manager.install(hooksBinaryURL: hooksBinaryURL)
+        }
+    }
+
+    func uninstallCodexHooks() {
+        updateCodexHooks(userMessage: "Removing Codex hooks.") { manager in
+            try manager.uninstall()
+        }
+    }
+
+    func installClaudeHooks() {
+        guard let hooksBinaryURL else {
+            lastActionMessage = "Could not find a local OpenIslandHooks binary. Build the package first."
+            return
+        }
+
+        updateClaudeHooks(userMessage: "Installing Claude hooks.") { manager in
+            try manager.install(hooksBinaryURL: hooksBinaryURL)
+        }
+    }
+
+    func uninstallClaudeHooks() {
+        updateClaudeHooks(userMessage: "Removing Claude hooks.") { manager in
+            try manager.uninstall()
+        }
+    }
+
+    func installClaudeUsageBridge() {
+        updateClaudeUsageBridge(userMessage: "Installing Claude usage bridge.") { manager in
+            try manager.install()
+        }
+    }
+
+    func uninstallClaudeUsageBridge() {
+        updateClaudeUsageBridge(userMessage: "Removing Claude usage bridge.") { manager in
+            try manager.uninstall()
+        }
+    }
+
+    private func send(_ command: BridgeCommand, userMessage: String) {
+        lastActionMessage = userMessage
+
+        Task { [weak self] in
+            guard let self else {
+                return
+            }
+
+            do {
+                try await self.bridgeClient.send(command)
+            } catch {
+                self.lastActionMessage = "Failed to send bridge command: \(error.localizedDescription)"
+            }
+        }
+    }
+
+    private func permissionResolution(for approved: Bool) -> PermissionResolution {
+        if approved {
+            return .allowOnce()
+        }
+
+        return .deny(message: "Permission denied in Open Island.", interrupt: false)
+    }
+
+    private func updateCodexHooks(
+        userMessage: String,
+        operation: @escaping (CodexHookInstallationManager) throws -> CodexHookInstallationStatus
+    ) {
+        isCodexSetupBusy = true
+        lastActionMessage = userMessage
+
+        Task { [weak self] in
+            guard let self else {
+                return
+            }
+
+            defer {
+                self.isCodexSetupBusy = false
+            }
+
+            do {
+                let status = try operation(self.codexHookInstallationManager)
+                self.codexHookStatus = status
+                if status.managedHooksPresent {
+                    self.lastActionMessage = "Codex hooks are installed and ready."
+                } else {
+                    self.lastActionMessage = "Codex hooks are not installed."
+                }
+            } catch {
+                self.lastActionMessage = "Codex hook update failed: \(error.localizedDescription)"
+            }
+        }
+    }
+
+    private func updateClaudeHooks(
+        userMessage: String,
+        operation: @escaping (ClaudeHookInstallationManager) throws -> ClaudeHookInstallationStatus
+    ) {
+        isClaudeHookSetupBusy = true
+        lastActionMessage = userMessage
+
+        Task { [weak self] in
+            guard let self else {
+                return
+            }
+
+            defer {
+                self.isClaudeHookSetupBusy = false
+            }
+
+            do {
+                let status = try operation(self.claudeHookInstallationManager)
+                self.claudeHookStatus = status
+                if status.managedHooksPresent {
+                    self.lastActionMessage = status.hasClaudeIslandHooks
+                        ? "Claude hooks are installed. claude-island hooks are also still present."
+                        : "Claude hooks are installed and ready."
+                } else {
+                    self.lastActionMessage = "Claude hooks are not installed."
+                }
+            } catch {
+                self.lastActionMessage = "Claude hook update failed: \(error.localizedDescription)"
+            }
+        }
+    }
+
+    private func updateClaudeUsageBridge(
+        userMessage: String,
+        operation: @escaping (ClaudeStatusLineInstallationManager) throws -> ClaudeStatusLineInstallationStatus
+    ) {
+        isClaudeUsageSetupBusy = true
+        lastActionMessage = userMessage
+
+        Task { [weak self] in
+            guard let self else {
+                return
+            }
+
+            defer {
+                self.isClaudeUsageSetupBusy = false
+            }
+
+            do {
+                let status = try operation(self.claudeStatusLineInstallationManager)
+                self.claudeStatusLineStatus = status
+                self.claudeUsageSnapshot = try ClaudeUsageLoader.load()
+                if status.managedStatusLineInstalled {
+                    self.lastActionMessage = "Claude usage bridge is installed. Start a Claude Code turn to refresh cached rate limits."
+                } else {
+                    self.lastActionMessage = "Claude usage bridge is not installed."
+                }
+            } catch {
+                self.lastActionMessage = "Claude usage bridge update failed: \(error.localizedDescription)"
+            }
+        }
+    }
+
+    private func applyTrackedEvent(
+        _ event: AgentEvent,
+        updateLastActionMessage: Bool = true
+    ) {
+        state.apply(event)
+        reconcileIslandSurfaceAfterStateChange()
+        markSessionAttached(for: event)
+        synchronizeSelection()
+        refreshCodexRolloutTracking()
+        refreshOverlayPlacementIfVisible()
+        scheduleCodexSessionPersistence()
+        scheduleClaudeSessionPersistence()
+
+        if updateLastActionMessage {
+            lastActionMessage = describe(event)
+        }
+
+        if let surface = IslandSurface.notificationSurface(for: event),
+           notchStatus == .closed || notchOpenReason == .notification {
+            presentNotificationSurface(surface)
+        }
+    }
+
+    private func presentNotificationSurface(_ surface: IslandSurface) {
+        guard surface.isNotificationCard else {
+            return
+        }
+
+        notchOpen(reason: .notification, surface: surface)
+    }
+
+    private func reconcileIslandSurfaceAfterStateChange() {
+        guard islandSurface.isNotificationCard else {
+            return
+        }
+
+        let session = activeIslandCardSession
+        guard islandSurface.matchesCurrentState(of: session) else {
+            if notchOpenReason == .notification {
+                notchClose()
+            } else {
+                islandSurface = .sessionList
+            }
+            return
+        }
+
+        updateNotificationAutoCollapse()
+    }
+
+    private func dismissNotificationSurfaceIfPresent(for sessionID: String) {
+        guard islandSurface.sessionID == sessionID,
+              notchOpenReason == .notification else {
+            return
+        }
+
+        notchClose()
+    }
+
+    private func updateNotificationAutoCollapse() {
+        notificationAutoCollapseTask?.cancel()
+        notificationAutoCollapseTask = nil
+
+        guard notchStatus == .opened,
+              notchOpenReason == .notification,
+              islandSurface.autoDismissesWhenPresentedAsNotification else {
+            return
+        }
+
+        notificationAutoCollapseTask = Task { @MainActor [weak self] in
+            try? await Task.sleep(for: .seconds(Self.notificationSurfaceAutoCollapseDelay))
+
+            guard let self,
+                  self.notchStatus == .opened,
+                  self.notchOpenReason == .notification,
+                  self.islandSurface.autoDismissesWhenPresentedAsNotification else {
+                return
+            }
+
+            self.notchClose()
+        }
+    }
+
+    private func synchronizeSelection() {
+        let surfacedIDs = Set(surfacedSessions.map(\.id))
+
+        if let activeAction = state.activeActionableSession {
+            selectedSessionID = activeAction.id
+            return
+        }
+
+        guard let selectedSessionID,
+              surfacedIDs.contains(selectedSessionID),
+              state.session(id: selectedSessionID) != nil else {
+            self.selectedSessionID = surfacedSessions.first?.id ?? state.sessions.first?.id
+            return
+        }
+    }
+
+    private func restorePersistedCodexSessions() {
+        do {
+            let loadedRecords = try codexSessionStore.load()
+            let records = loadedRecords.filter {
+                $0.updatedAt >= Date.now.addingTimeInterval(-86_400) && $0.shouldRestoreToLiveState
+            }
+
+            if records != loadedRecords {
+                try? codexSessionStore.save(records)
+            }
+
+            guard !records.isEmpty else {
+                return
+            }
+
+            state = SessionState(sessions: records.map(\.session))
+            synchronizeSelection()
+            refreshOverlayPlacementIfVisible()
+            lastActionMessage = "Restored \(records.count) recent Codex session(s) from local cache."
+        } catch {
+            lastActionMessage = "Failed to restore Codex session cache: \(error.localizedDescription)"
+        }
+    }
+
+    private func restorePersistedClaudeSessions() {
+        do {
+            let loadedRecords = try claudeSessionRegistry.load()
+            let records = loadedRecords.filter {
+                $0.updatedAt >= Date.now.addingTimeInterval(-86_400) && $0.shouldRestoreToLiveState
+            }
+
+            if records != loadedRecords {
+                try? claudeSessionRegistry.save(records)
+            }
+
+            guard !records.isEmpty else {
+                return
+            }
+
+            let restoredSessions = records.map(\.restorableSession)
+            state = SessionState(sessions: mergeDiscoveredSessions(restoredSessions))
+            synchronizeSelection()
+            refreshOverlayPlacementIfVisible()
+            lastActionMessage = "Restored \(records.count) recent Claude session(s) from local registry."
+        } catch {
+            lastActionMessage = "Failed to restore Claude session registry: \(error.localizedDescription)"
+        }
+    }
+
+    private func discoverRecentCodexSessions() {
+        let records = codexRolloutDiscovery.discoverRecentSessions()
+        guard !records.isEmpty else {
+            return
+        }
+
+        let mergedSessions = mergeDiscoveredSessions(records.map(\.session))
+        state = SessionState(sessions: mergedSessions)
+        synchronizeSelection()
+        refreshOverlayPlacementIfVisible()
+        scheduleCodexSessionPersistence()
+        lastActionMessage = "Discovered \(records.count) recent Codex session(s) from local rollouts."
+    }
+
+    private func discoverRecentClaudeSessions() {
+        let sessions = claudeTranscriptDiscovery.discoverRecentSessions()
+        guard !sessions.isEmpty else {
+            return
+        }
+
+        let mergedSessions = mergeDiscoveredSessions(sessions)
+        state = SessionState(sessions: mergedSessions)
+        synchronizeSelection()
+        refreshOverlayPlacementIfVisible()
+        scheduleClaudeSessionPersistence()
+        lastActionMessage = "Discovered \(sessions.count) recent Claude session(s) from local transcripts."
+    }
+
+    private func refreshCodexRolloutTracking() {
+        let targets = state.sessions.compactMap { session -> CodexRolloutWatchTarget? in
+            guard session.tool == .codex,
+                  let transcriptPath = session.codexMetadata?.transcriptPath,
+                  !transcriptPath.isEmpty else {
+                return nil
+            }
+
+            return CodexRolloutWatchTarget(
+                sessionID: session.id,
+                transcriptPath: transcriptPath
+            )
+        }
+
+        codexRolloutWatcher.sync(targets: targets)
+    }
+
+    func mergeDiscoveredSessions(_ discoveredSessions: [AgentSession]) -> [AgentSession] {
+        var mergedByID = Dictionary(uniqueKeysWithValues: state.sessions.map { ($0.id, $0) })
+
+        for discovered in discoveredSessions {
+            if let existing = mergedByID[discovered.id] {
+                mergedByID[discovered.id] = merge(discovered: discovered, into: existing)
+            } else {
+                mergedByID[discovered.id] = discovered
+            }
+        }
+
+        return Array(mergedByID.values)
+    }
+
+    private func merge(discovered: AgentSession, into existing: AgentSession) -> AgentSession {
+        var merged = existing
+        let discoveredIsNewer = discovered.updatedAt >= existing.updatedAt
+
+        if discoveredIsNewer {
+            merged.title = discovered.title
+            merged.phase = discovered.phase
+            merged.summary = discovered.summary
+            merged.updatedAt = discovered.updatedAt
+            merged.permissionRequest = discovered.permissionRequest
+            merged.questionPrompt = discovered.questionPrompt
+        }
+
+        merged.origin = existing.origin ?? discovered.origin
+        merged.attachmentState = mergeAttachmentState(existing.attachmentState, discovered.attachmentState)
+        merged.jumpTarget = existing.jumpTarget ?? discovered.jumpTarget
+        merged.codexMetadata = mergeCodexMetadata(existing.codexMetadata, discovered.codexMetadata)
+        merged.claudeMetadata = mergeClaudeMetadata(existing.claudeMetadata, discovered.claudeMetadata)
+
+        return merged
+    }
+
+    private func mergeCodexMetadata(
+        _ existing: CodexSessionMetadata?,
+        _ discovered: CodexSessionMetadata?
+    ) -> CodexSessionMetadata? {
+        guard let existing else {
+            return discovered?.isEmpty == true ? nil : discovered
+        }
+
+        guard let discovered else {
+            return existing.isEmpty ? nil : existing
+        }
+
+        let merged = CodexSessionMetadata(
+            transcriptPath: discovered.transcriptPath ?? existing.transcriptPath,
+            initialUserPrompt: existing.initialUserPrompt ?? discovered.initialUserPrompt ?? discovered.lastUserPrompt,
+            lastUserPrompt: discovered.lastUserPrompt ?? existing.lastUserPrompt,
+            lastAssistantMessage: discovered.lastAssistantMessage ?? existing.lastAssistantMessage,
+            currentTool: discovered.currentTool ?? existing.currentTool,
+            currentCommandPreview: discovered.currentCommandPreview ?? existing.currentCommandPreview
+        )
+        return merged.isEmpty ? nil : merged
+    }
+
+    private func mergeClaudeMetadata(
+        _ existing: ClaudeSessionMetadata?,
+        _ discovered: ClaudeSessionMetadata?
+    ) -> ClaudeSessionMetadata? {
+        guard let existing else {
+            return discovered?.isEmpty == true ? nil : discovered
+        }
+
+        guard let discovered else {
+            return existing.isEmpty ? nil : existing
+        }
+
+        let merged = ClaudeSessionMetadata(
+            transcriptPath: discovered.transcriptPath ?? existing.transcriptPath,
+            initialUserPrompt: existing.initialUserPrompt ?? discovered.initialUserPrompt ?? discovered.lastUserPrompt,
+            lastUserPrompt: discovered.lastUserPrompt ?? existing.lastUserPrompt,
+            lastAssistantMessage: discovered.lastAssistantMessage ?? existing.lastAssistantMessage,
+            currentTool: discovered.currentTool ?? existing.currentTool,
+            currentToolInputPreview: discovered.currentToolInputPreview ?? existing.currentToolInputPreview,
+            model: discovered.model ?? existing.model,
+            startupSource: discovered.startupSource ?? existing.startupSource,
+            permissionMode: discovered.permissionMode ?? existing.permissionMode,
+            agentID: discovered.agentID ?? existing.agentID,
+            agentType: discovered.agentType ?? existing.agentType
+        )
+        return merged.isEmpty ? nil : merged
+    }
+
+    private func dismissOverlayForJump() {
+        guard isOverlayVisible else {
+            return
+        }
+
+        notchClose()
+    }
+
+    private var preferredOverlayScreenID: String? {
+        overlayDisplaySelectionID == OverlayDisplayOption.automaticID
+            ? nil
+            : overlayDisplaySelectionID
+    }
+
+    private var sessionBuckets: (primary: [AgentSession], overflow: [AgentSession]) {
+        let now = Date.now
+        let rankedSessions = state.sessions.sorted { lhs, rhs in
+            let lhsScore = displayPriority(for: lhs, now: now)
+            let rhsScore = displayPriority(for: rhs, now: now)
+
+            if lhsScore == rhsScore {
+                if lhs.islandActivityDate == rhs.islandActivityDate {
+                    return lhs.title.localizedStandardCompare(rhs.title) == .orderedAscending
+                }
+
+                return lhs.islandActivityDate > rhs.islandActivityDate
+            }
+
+            return lhsScore > rhsScore
+        }
+
+        let primary = rankedSessions.filter(\.isAttachedToTerminal)
+        let primaryIDs = Set(primary.map(\.id))
+        let overflow = rankedSessions.filter { !primaryIDs.contains($0.id) }
+        return (primary, overflow)
+    }
+
+    private func displayPriority(for session: AgentSession, now: Date) -> Int {
+        var score = 0
+
+        switch session.attachmentState {
+        case .attached:
+            score += 12_000
+        case .stale:
+            score += 1_000
+        case .detached:
+            break
+        }
+
+        if session.phase.requiresAttention {
+            score += 10_000
+        }
+
+        if session.currentToolName?.isEmpty == false {
+            score += 6_000
+        }
+
+        if session.jumpTarget != nil {
+            score += 4_000
+        }
+
+        switch session.phase {
+        case .running:
+            score += 2_000
+        case .waitingForApproval:
+            score += 1_500
+        case .waitingForAnswer:
+            score += 1_200
+        case .completed:
+            score += 600
+        }
+
+        let age = now.timeIntervalSince(session.islandActivityDate)
+        switch age {
+        case ..<120:
+            score += 500
+        case ..<900:
+            score += 250
+        case ..<3_600:
+            score += 120
+        case ..<21_600:
+            score += 40
+        default:
+            break
+        }
+
+        return score
+    }
+
+    private func persistOverlayDisplayPreference() {
+        let defaults = UserDefaults.standard
+
+        if overlayDisplaySelectionID == OverlayDisplayOption.automaticID {
+            defaults.removeObject(forKey: Self.overlayDisplayPreferenceDefaultsKey)
+        } else {
+            defaults.set(overlayDisplaySelectionID, forKey: Self.overlayDisplayPreferenceDefaultsKey)
+        }
+    }
+
+    private func startSessionAttachmentMonitoringIfNeeded() {
+        guard sessionAttachmentMonitorTask == nil else {
+            return
+        }
+
+        sessionAttachmentMonitorTask = Task { @MainActor [weak self] in
+            guard let self else {
+                return
+            }
+
+            while !Task.isCancelled {
+                self.reconcileSessionAttachments()
+                try? await Task.sleep(for: .seconds(3))
+            }
+        }
+    }
+
+    private func startClaudeUsageMonitoringIfNeeded() {
+        guard claudeUsageMonitorTask == nil else {
+            return
+        }
+
+        claudeUsageMonitorTask = Task { @MainActor [weak self] in
+            guard let self else {
+                return
+            }
+
+            while !Task.isCancelled {
+                self.refreshClaudeUsageState()
+                try? await Task.sleep(for: .seconds(5))
+            }
+        }
+    }
+
+    private func startCodexUsageMonitoringIfNeeded() {
+        guard codexUsageMonitorTask == nil else {
+            return
+        }
+
+        codexUsageMonitorTask = Task { @MainActor [weak self] in
+            guard let self else {
+                return
+            }
+
+            while !Task.isCancelled {
+                self.refreshCodexUsageState()
+                try? await Task.sleep(for: .seconds(1))
+            }
+        }
+    }
+
+    private func reconcileSessionAttachments() {
+        let activeProcesses = activeAgentProcessDiscovery.discover()
+        let mergedSessions = mergedWithSyntheticClaudeSessions(
+            existingSessions: state.sessions,
+            activeProcesses: activeProcesses
+        )
+        let syntheticSessionsChanged = mergedSessions != state.sessions
+        if syntheticSessionsChanged {
+            state = SessionState(sessions: mergedSessions)
+        }
+
+        let sessions = state.sessions.filter(\.isTrackedLiveSession)
+        guard !sessions.isEmpty else {
+            return
+        }
+
+        let resolutions = terminalSessionAttachmentProbe.sessionResolutions(
+            for: sessions,
+            activeProcesses: activeProcesses
+        )
+        let attachmentUpdates = resolutions.mapValues(\.attachmentState)
+        let jumpTargetUpdates = resolutions.reduce(into: [String: JumpTarget]()) { partialResult, entry in
+            if let correctedJumpTarget = entry.value.correctedJumpTarget {
+                partialResult[entry.key] = correctedJumpTarget
+            }
+        }
+
+        let attachmentsChanged = state.reconcileAttachmentStates(attachmentUpdates)
+        let jumpTargetsChanged = state.reconcileJumpTargets(jumpTargetUpdates)
+        guard syntheticSessionsChanged || attachmentsChanged || jumpTargetsChanged else {
+            return
+        }
+
+        synchronizeSelection()
+        refreshOverlayPlacementIfVisible()
+        scheduleCodexSessionPersistence()
+        scheduleClaudeSessionPersistence()
+    }
+
+    private func markSessionAttached(for event: AgentEvent) {
+        guard let sessionID = sessionID(for: event) else {
+            return
+        }
+
+        _ = state.reconcileAttachmentStates([sessionID: .attached])
+    }
+
+    private func sessionID(for event: AgentEvent) -> String? {
+        switch event {
+        case let .sessionStarted(payload):
+            payload.sessionID
+        case let .activityUpdated(payload):
+            payload.sessionID
+        case let .permissionRequested(payload):
+            payload.sessionID
+        case let .questionAsked(payload):
+            payload.sessionID
+        case let .sessionCompleted(payload):
+            payload.sessionID
+        case let .jumpTargetUpdated(payload):
+            payload.sessionID
+        case let .sessionMetadataUpdated(payload):
+            payload.sessionID
+        case let .claudeSessionMetadataUpdated(payload):
+            payload.sessionID
+        }
+    }
+
+    private func mergeAttachmentState(
+        _ existing: SessionAttachmentState,
+        _ discovered: SessionAttachmentState
+    ) -> SessionAttachmentState {
+        switch (existing, discovered) {
+        case (.attached, _), (_, .attached):
+            .attached
+        case (.stale, _), (_, .stale):
+            .stale
+        case (.detached, .detached):
+            .detached
+        }
+    }
+
+    private func scheduleCodexSessionPersistence() {
+        codexSessionPersistenceTask?.cancel()
+
+        let records = state.sessions
+            .filter { $0.isTrackedLiveCodexSession && $0.updatedAt >= Date.now.addingTimeInterval(-86_400) }
+            .map(CodexTrackedSessionRecord.init(session:))
+        let store = codexSessionStore
+
+        codexSessionPersistenceTask = Task.detached(priority: .utility) {
+            try? await Task.sleep(for: .milliseconds(250))
+            try? store.save(records)
+        }
+    }
+
+    private func scheduleClaudeSessionPersistence() {
+        claudeSessionPersistenceTask?.cancel()
+
+        let records = state.sessions
+            .filter {
+                $0.tool == .claudeCode
+                    && $0.isTrackedLiveSession
+                    && !$0.id.hasPrefix(Self.syntheticClaudeSessionPrefix)
+                    && $0.updatedAt >= Date.now.addingTimeInterval(-86_400)
+                    && ($0.jumpTarget != nil || $0.claudeMetadata?.transcriptPath != nil)
+            }
+            .map(ClaudeTrackedSessionRecord.init(session:))
+        let registry = claudeSessionRegistry
+
+        claudeSessionPersistenceTask = Task.detached(priority: .utility) {
+            try? await Task.sleep(for: .milliseconds(250))
+            try? registry.save(records)
+        }
+    }
+
+    func mergedWithSyntheticClaudeSessions(
+        existingSessions: [AgentSession],
+        activeProcesses: [ActiveProcessSnapshot],
+        now: Date = .now
+    ) -> [AgentSession] {
+        let baseSessions = existingSessions.filter { !isSyntheticClaudeSession($0) }
+        let syntheticSessions = syntheticClaudeSessions(
+            existingSessions: baseSessions,
+            activeProcesses: activeProcesses,
+            now: now
+        )
+
+        return baseSessions + syntheticSessions
+    }
+
+    private func syntheticClaudeSessions(
+        existingSessions: [AgentSession],
+        activeProcesses: [ActiveProcessSnapshot],
+        now: Date
+    ) -> [AgentSession] {
+        let attachedClaudeSessions = existingSessions.filter { session in
+            session.tool == .claudeCode && session.isAttachedToTerminal
+        }
+
+        var exactMatchedProcessKeys: Set<String> = []
+        let activeClaudeProcesses = activeProcesses.filter { process in
+            process.tool == .claudeCode && supportedTerminalApp(for: process.terminalApp) != nil
+        }
+
+        for process in activeClaudeProcesses {
+            if let sessionID = process.sessionID,
+               attachedClaudeSessions.contains(where: { $0.id == sessionID }) {
+                exactMatchedProcessKeys.insert(processIdentityKey(process))
+                continue
+            }
+
+            if let terminalTTY = normalizedTTYForMatching(process.terminalTTY),
+               attachedClaudeSessions.contains(where: {
+                   normalizedTTYForMatching($0.jumpTarget?.terminalTTY) == terminalTTY
+               }) {
+                exactMatchedProcessKeys.insert(processIdentityKey(process))
+            }
+        }
+
+        let unmatchedProcesses = activeClaudeProcesses.filter {
+            !exactMatchedProcessKeys.contains(processIdentityKey($0))
+        }
+
+        let groupedProcesses = Dictionary(grouping: unmatchedProcesses, by: syntheticClaudeGroupKey(for:))
+
+        return groupedProcesses.values.flatMap { processes -> [AgentSession] in
+            guard let firstProcess = processes.first,
+                  let groupKey = syntheticClaudeGroupKey(for: firstProcess),
+                  let terminalApp = supportedTerminalApp(for: firstProcess.terminalApp) else {
+                return []
+            }
+
+            let representedCount = attachedClaudeSessions.filter { session in
+                supportedTerminalApp(for: session.jumpTarget?.terminalApp) == terminalApp
+                    && syntheticClaudeGroupKey(for: session) == groupKey
+            }.count
+
+            let syntheticCount = max(0, processes.count - representedCount)
+            guard syntheticCount > 0 else {
+                return []
+            }
+
+            return processes
+                .sorted { processIdentityKey($0) < processIdentityKey($1) }
+                .prefix(syntheticCount)
+                .map { syntheticClaudeSession(for: $0, now: now) }
+        }
+    }
+
+    private func syntheticClaudeSession(
+        for process: ActiveProcessSnapshot,
+        now: Date
+    ) -> AgentSession {
+        let workingDirectory = process.workingDirectory
+        let workspaceName = workingDirectory.map { URL(fileURLWithPath: $0).lastPathComponent }.flatMap { value in
+            value.isEmpty ? nil : value
+        } ?? "Workspace"
+        let terminalApp = supportedTerminalApp(for: process.terminalApp) ?? "Unknown"
+        let identity = processIdentityKey(process)
+
+        return AgentSession(
+            id: "\(Self.syntheticClaudeSessionPrefix)\(identity)",
+            title: "Claude · \(workspaceName)",
+            tool: .claudeCode,
+            origin: .live,
+            attachmentState: .attached,
+            phase: .running,
+            summary: "Active Claude session detected from \(terminalApp).",
+            updatedAt: now,
+            jumpTarget: JumpTarget(
+                terminalApp: terminalApp,
+                workspaceName: workspaceName,
+                paneTitle: "Claude \(workspaceName)",
+                workingDirectory: workingDirectory,
+                terminalTTY: process.terminalTTY
+            )
+        )
+    }
+
+    private func isSyntheticClaudeSession(_ session: AgentSession) -> Bool {
+        session.tool == .claudeCode && session.id.hasPrefix(Self.syntheticClaudeSessionPrefix)
+    }
+
+    private func processIdentityKey(_ process: ActiveProcessSnapshot) -> String {
+        [
+            process.sessionID,
+            normalizedTTYForMatching(process.terminalTTY),
+            normalizedPathForMatching(process.workingDirectory),
+            supportedTerminalApp(for: process.terminalApp),
+        ]
+        .compactMap { $0 }
+        .joined(separator: "|")
+    }
+
+    private func syntheticClaudeGroupKey(for process: ActiveProcessSnapshot) -> String? {
+        if let workingDirectory = normalizedPathForMatching(process.workingDirectory) {
+            return "cwd:\(workingDirectory)"
+        }
+
+        if let terminalTTY = normalizedTTYForMatching(process.terminalTTY) {
+            return "tty:\(terminalTTY)"
+        }
+
+        return nil
+    }
+
+    private func syntheticClaudeGroupKey(for session: AgentSession) -> String? {
+        if let workingDirectory = normalizedPathForMatching(session.jumpTarget?.workingDirectory) {
+            return "cwd:\(workingDirectory)"
+        }
+
+        if let terminalTTY = normalizedTTYForMatching(session.jumpTarget?.terminalTTY) {
+            return "tty:\(terminalTTY)"
+        }
+
+        return nil
+    }
+
+    private func normalizedPathForMatching(_ value: String?) -> String? {
+        guard let value = value?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !value.isEmpty else {
+            return nil
+        }
+
+        return URL(fileURLWithPath: value).standardizedFileURL.path.lowercased()
+    }
+
+    private func normalizedTTYForMatching(_ value: String?) -> String? {
+        guard let value = value?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !value.isEmpty else {
+            return nil
+        }
+
+        return value.hasPrefix("/dev/") ? value : "/dev/\(value)"
+    }
+
+    private func supportedTerminalApp(for value: String?) -> String? {
+        guard let normalized = value?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() else {
+            return nil
+        }
+
+        switch normalized {
+        case "ghostty":
+            return "Ghostty"
+        case "terminal", "apple_terminal":
+            return "Terminal"
+        default:
+            return nil
+        }
+    }
+
+    private func describe(_ event: AgentEvent) -> String {
+        switch event {
+        case let .sessionStarted(payload):
+            return "Session started: \(payload.title)"
+        case let .activityUpdated(payload):
+            return payload.summary
+        case let .permissionRequested(payload):
+            return payload.request.summary
+        case let .questionAsked(payload):
+            return payload.prompt.title
+        case let .sessionCompleted(payload):
+            return payload.summary
+        case let .jumpTargetUpdated(payload):
+            return "Jump target updated to \(payload.jumpTarget.terminalApp)."
+        case let .sessionMetadataUpdated(payload):
+            if let currentTool = payload.codexMetadata.currentTool {
+                return "Codex is running \(currentTool)."
+            }
+
+            return payload.codexMetadata.lastAssistantMessage ?? "Codex session metadata updated."
+        case let .claudeSessionMetadataUpdated(payload):
+            if let currentTool = payload.claudeMetadata.currentTool {
+                return "Claude is running \(currentTool)."
+            }
+
+            return payload.claudeMetadata.lastAssistantMessage ?? "Claude session metadata updated."
+        }
+    }
+
+    private var relativeTimestampFormatter: RelativeDateTimeFormatter {
+        let formatter = RelativeDateTimeFormatter()
+        formatter.unitsStyle = .short
+        return formatter
+    }
+}

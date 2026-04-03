@@ -1,4 +1,4 @@
-# open-vibe-island
+# Open Island
 
 > 我不想在自己的电脑上运行一个闭源、付费的软件来监视我所有的生产过程。<br>
 > 所以我 build 了这个开源的版本。<br>
@@ -7,13 +7,13 @@
 
 The open-source macOS companion for terminal-native AI coding.
 
-`open-vibe-island` puts a lightweight control surface in your notch or top bar so you can keep an eye on live coding agents, follow session progress, and jump back to the right terminal without breaking flow.
+`Open Island` puts a lightweight control surface in your notch or top bar so you can keep an eye on live coding agents, follow session progress, and jump back to the right terminal without breaking flow.
 
 ## Why This Product Exists
 
 AI coding is becoming part of the daily development loop, but the surrounding control layer still too often means handing your machine over to a closed-source paid app.
 
-`open-vibe-island` takes the opposite approach:
+`Open Island` takes the opposite approach:
 
 - open source
 - local first
@@ -33,7 +33,7 @@ This is for developers who already live in the terminal and want a better way to
 
 ## Current Product Shape
 
-Right now `open-vibe-island` is focused on one thing: making the Codex-on-macOS workflow feel more native.
+Right now `Open Island` is focused on one thing: making the Codex-on-macOS workflow feel more native.
 
 Current scope:
 
@@ -58,9 +58,9 @@ Today the project can already:
 - read cached Claude 5-hour and 7-day usage windows in the UI
 - use terminal hints for best-effort jump back behavior
 
-The managed Codex install now follows the original Vibe Island footprint and only installs `SessionStart`, `UserPromptSubmit`, and `Stop` hooks by default. The bridge still supports richer interactive hooks, but they are not enabled by default because `PreToolUse` and `PostToolUse` create a lot of terminal noise during normal Codex use.
+The managed Codex install keeps the same low-noise footprint and only installs `SessionStart`, `UserPromptSubmit`, and `Stop` hooks by default. The bridge still supports richer interactive hooks, but they are not enabled by default because `PreToolUse` and `PostToolUse` create a lot of terminal noise during normal Codex use.
 
-The Claude bridge is intentionally conservative. It writes a managed `statusLine.command` to `~/.vibe-island/bin/vibe-island-statusline`, caches `rate_limits` into `/tmp/vibe-island-rl.json`, and refuses to overwrite an existing custom Claude status line automatically.
+The Claude bridge is intentionally conservative. It writes a managed `statusLine.command` to `~/.open-island/bin/open-island-statusline`, caches `rate_limits` into `/tmp/open-island-rl.json`, and refuses to overwrite an existing custom Claude status line automatically.
 
 ## Quick Start
 
@@ -76,7 +76,7 @@ Connect Codex:
 
 Open the package in Xcode to run the macOS app target. On launch, the app restores its local cache, scans recent `~/.codex/sessions/**/rollout-*.jsonl` files for existing Codex sessions, and then starts the live bridge for new hook events.
 
-The control center also shows live Codex hook install status from `~/.codex`, and can install or uninstall the managed hook entries directly if it can locate a local `VibeIslandHooks` executable. Claude usage setup is available from the app and remains opt-in.
+The control center also shows live Codex hook install status from `~/.codex`, and can install or uninstall the managed hook entries directly if it can locate a local `OpenIslandHooks` executable. Claude usage setup is available from the app and remains opt-in.
 
 ```toml
 [features]
@@ -84,8 +84,8 @@ codex_hooks = true
 ```
 
 ```bash
-swift build -c release --product VibeIslandHooks
-swift run VibeIslandSetup install --hooks-binary "$(pwd)/.build/release/VibeIslandHooks"
+swift build -c release --product OpenIslandHooks
+swift run OpenIslandSetup install --hooks-binary "$(pwd)/.build/release/OpenIslandHooks"
 ```
 
 That setup enables `codex_hooks = true` and installs a low-noise hook set matching the original app's Codex integration: `SessionStart`, `UserPromptSubmit`, and `Stop`.
@@ -93,8 +93,8 @@ That setup enables `codex_hooks = true` and installs a low-noise hook set matchi
 Check or remove the setup later:
 
 ```bash
-swift run VibeIslandSetup status --hooks-binary "$(pwd)/.build/release/VibeIslandHooks"
-swift run VibeIslandSetup uninstall
+swift run OpenIslandSetup status --hooks-binary "$(pwd)/.build/release/OpenIslandHooks"
+swift run OpenIslandSetup uninstall
 ```
 
 ## Product Direction

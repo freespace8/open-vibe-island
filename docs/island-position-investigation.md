@@ -1,10 +1,10 @@
 # Island Position Investigation
 
-Reviewed on 2026-04-02 in worktree `../vibe-island-island-investigate` on branch `investigate/island-position`.
+Reviewed on 2026-04-02 in worktree `../open-island-island-investigate` on branch `investigate/island-position`.
 
 ## Question
 
-Why does the current open-source island feel "off" compared with the official Vibe Island behavior on a MacBook with a built-in notch?
+Why does the current open-source island feel "off" compared with the official Open Island behavior on a MacBook with a built-in notch?
 
 ## Short Answer
 
@@ -22,7 +22,7 @@ That combination makes it behave like a generic top-center floating window, not 
 
 ### 1. The code picks the wrong screen
 
-Current positioning logic in `Sources/VibeIslandApp/OverlayPanelController.swift`:
+Current positioning logic in `Sources/OpenIslandApp/OverlayPanelController.swift`:
 
 ```swift
 let screen = NSScreen.main ?? NSScreen.screens.first

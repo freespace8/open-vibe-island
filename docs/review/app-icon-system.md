@@ -1,6 +1,6 @@
 # App Icon System Review
 
-Open [app-icon-system-preview.html](/Users/wangruobing/Personal/vibe-island/docs/review/app-icon-system-preview.html) to review the first icon-system pass.
+Open [app-icon-system-preview.html](/Users/wangruobing/Personal/open-island/docs/review/app-icon-system-preview.html) to review the first icon-system pass.
 
 This round stays in review space only:
 

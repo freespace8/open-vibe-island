@@ -13,11 +13,11 @@ from PIL import Image, ImageChops, ImageDraw, ImageFilter
 REPO_ROOT = Path(__file__).resolve().parents[1]
 BRAND_ROOT = REPO_ROOT / "Assets" / "Brand"
 APP_ICONSET_DIR = BRAND_ROOT / "AppIcon.appiconset"
-ICONSET_DIR = BRAND_ROOT / "VibeIsland.iconset"
+ICONSET_DIR = BRAND_ROOT / "OpenIsland.iconset"
 INTERNAL_COLOR_DIR = BRAND_ROOT / "Internal" / "color"
 INTERNAL_TEMPLATE_DIR = BRAND_ROOT / "Internal" / "template"
 INTERNAL_BADGE_DIR = BRAND_ROOT / "Internal" / "badge"
-ICNS_PATH = BRAND_ROOT / "VibeIsland.icns"
+ICNS_PATH = BRAND_ROOT / "OpenIsland.icns"
 SVG_MASTER_PATH = BRAND_ROOT / "scout-app-icon-master.svg"
 
 SCOUT_PATTERN = [
@@ -364,7 +364,7 @@ def write_appiconset_contents_json(path: Path) -> None:
     contents = {
         "images": images,
         "info": {
-            "author": "app.vibeisland.oss.dev",
+            "author": "app.openisland.dev",
             "version": 1,
         },
     }

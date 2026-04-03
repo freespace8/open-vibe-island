@@ -1,6 +1,6 @@
 # Pickaxe Swing Preview
 
-Open [pickaxe-swing-preview.html](/Users/wangruobing/Personal/vibe-island/docs/review/pickaxe-swing-preview.html) to review the Terraria-like mining motion direction.
+Open [pickaxe-swing-preview.html](/Users/wangruobing/Personal/open-island/docs/review/pickaxe-swing-preview.html) to review the Terraria-like mining motion direction.
 
 What this file shows:
 
