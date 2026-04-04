@@ -37,7 +37,9 @@ struct TerminalJumpService {
         ),
     ]
 
-    private static let ghosttyFocusSettleDelay = 0.15
+    private static let ghosttyFocusSettleDelay = 0.12
+    private static let ghosttyWindowActivationDelay = 0.05
+    private static let ghosttyFocusAttempts = 4
 
     func jump(to target: JumpTarget) throws -> String {
         let descriptor = resolveTerminalApp(preferredName: target.terminalApp)
@@ -120,48 +122,72 @@ struct TerminalJumpService {
             if not (it is running) then return ""
             activate
 
+            set targetWindow to missing value
+            set targetTab to missing value
             set targetTerminal to missing value
 
-            repeat with aTerminal in terminals
-                if "\(terminalSessionID)" is not "" and (id of aTerminal as text) is "\(terminalSessionID)" then
-                    set targetTerminal to aTerminal
+            repeat with aWindow in windows
+                repeat with aTab in tabs of aWindow
+                    repeat with aTerminal in terminals of aTab
+                        if "\(terminalSessionID)" is not "" and (id of aTerminal as text) is "\(terminalSessionID)" then
+                            set targetWindow to aWindow
+                            set targetTab to aTab
+                            set targetTerminal to aTerminal
+                            exit repeat
+                        end if
+
+                        if targetTerminal is missing value and "\(workingDirectory)" is not "" and (working directory of aTerminal as text) is "\(workingDirectory)" then
+                            set targetWindow to aWindow
+                            set targetTab to aTab
+                            set targetTerminal to aTerminal
+                        end if
+
+                        if targetTerminal is missing value and "\(paneTitle)" is not "" and (name of aTerminal as text) contains "\(paneTitle)" then
+                            set targetWindow to aWindow
+                            set targetTab to aTab
+                            set targetTerminal to aTerminal
+                        end if
+                    end repeat
+
+                    if targetTerminal is not missing value then
+                        exit repeat
+                    end if
+                end repeat
+
+                if targetTerminal is not missing value then
                     exit repeat
                 end if
             end repeat
 
-            if targetTerminal is missing value then
-                repeat with aTerminal in terminals
-                    if "\(workingDirectory)" is not "" and (working directory of aTerminal as text) is "\(workingDirectory)" then
-                        set targetTerminal to aTerminal
-                        exit repeat
-                    end if
-                end repeat
-            end if
-
-            if targetTerminal is missing value then
-                repeat with aTerminal in terminals
-                    if "\(paneTitle)" is not "" and (name of aTerminal as text) contains "\(paneTitle)" then
-                        set targetTerminal to aTerminal
-                        exit repeat
-                    end if
-                end repeat
-            end if
-
             if targetTerminal is missing value then return ""
 
-            focus targetTerminal
-            -- Ghostty updates the focused split asynchronously after focus returns.
-            delay \(Self.ghosttyFocusSettleDelay)
+            if targetWindow is not missing value then
+                activate window targetWindow
+                delay \(Self.ghosttyWindowActivationDelay)
+            end if
+
+            if targetTab is not missing value then
+                select tab targetTab
+                delay \(Self.ghosttyWindowActivationDelay)
+            end if
 
             if "\(terminalSessionID)" is "" then
+                focus targetTerminal
+                delay \(Self.ghosttyFocusSettleDelay)
                 return "matched"
             end if
 
-            try
-                if (id of focused terminal of selected tab of front window as text) is "\(terminalSessionID)" then
-                    return "matched"
-                end if
-            end try
+            repeat \(Self.ghosttyFocusAttempts) times
+                focus targetTerminal
+                -- Ghostty updates the focused split asynchronously after focus returns.
+                delay \(Self.ghosttyFocusSettleDelay)
+
+                try
+                    if (id of focused terminal of selected tab of front window as text) is "\(terminalSessionID)" then
+                        return "matched"
+                    end if
+                end try
+            end repeat
         end tell
         return ""
         """
