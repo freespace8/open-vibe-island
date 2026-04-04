@@ -1027,13 +1027,23 @@ final class AppModel {
     }
 
     func refreshClaudeUsageState() {
+        let manager = claudeStatusLineInstallationManager
         Task { [weak self] in
             guard let self else {
                 return
             }
 
             do {
-                let usageState = try self.readClaudeUsageState(repairManagedBridgeIfNeeded: true)
+                let usageState = try await Task.detached(priority: .utility) {
+                    var status = try manager.status()
+                    var repairedManagedBridge = false
+                    if status.managedStatusLineNeedsRepair {
+                        status = try manager.install()
+                        repairedManagedBridge = true
+                    }
+                    let snapshot = try ClaudeUsageLoader.load()
+                    return (status: status, snapshot: snapshot, repairedManagedBridge: repairedManagedBridge)
+                }.value
                 self.claudeStatusLineStatus = usageState.status
                 self.claudeUsageSnapshot = usageState.snapshot
                 if usageState.repairedManagedBridge {
@@ -1778,7 +1788,7 @@ final class AppModel {
 
             while !Task.isCancelled {
                 self.refreshCodexUsageState()
-                try? await Task.sleep(for: .seconds(1))
+                try? await Task.sleep(for: .seconds(10))
             }
         }
     }

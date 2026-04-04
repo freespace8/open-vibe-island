@@ -827,7 +827,7 @@ public final class CodexRolloutWatcher: @unchecked Sendable {
     private var observations: [String: Observation] = [:]
 
     public init(
-        pollInterval: TimeInterval = 0.75,
+        pollInterval: TimeInterval = 3.0,
         initialReadLimit: UInt64 = 128 * 1_024,
         initialPromptBootstrapLimit: UInt64 = 4 * 1_024 * 1_024
     ) {
