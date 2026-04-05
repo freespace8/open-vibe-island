@@ -2347,6 +2347,8 @@ final class AppModel {
             return "Ghostty"
         case "terminal", "apple_terminal":
             return "Terminal"
+        case "cmux":
+            return "cmux"
         default:
             return nil
         }
