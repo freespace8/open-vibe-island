@@ -2,23 +2,71 @@ import SwiftUI
 @preconcurrency import MarkdownUI
 import OpenIslandCore
 
+private struct NotificationContentHeightKey: PreferenceKey {
+    static let defaultValue: CGFloat = 0
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+        value = max(value, nextValue())
+    }
+}
+
+private struct ContentHeightKey: PreferenceKey {
+    static let defaultValue: CGFloat = 0
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+        value = max(value, nextValue())
+    }
+}
+
+/// Auto-height container: renders content directly (auto-sizing).
+/// When content exceeds maxHeight, wraps in ScrollView at fixed maxHeight.
+private struct AutoHeightScrollView<Content: View>: View {
+    let maxHeight: CGFloat
+    @ViewBuilder let content: () -> Content
+    @State private var contentHeight: CGFloat = 0
+
+    var body: some View {
+        if contentHeight > maxHeight {
+            // Exceeds max → fixed height, scrollable
+            ScrollView(.vertical) {
+                measuredContent
+            }
+            .scrollIndicators(.automatic)
+            .frame(height: maxHeight)
+        } else {
+            // Fits within max → direct render, auto-height
+            measuredContent
+        }
+    }
+
+    private var measuredContent: some View {
+        content()
+            .background(
+                GeometryReader { geo in
+                    Color.clear.preference(key: ContentHeightKey.self, value: geo.size.height)
+                }
+            )
+            .onPreferenceChange(ContentHeightKey.self) { height in
+                if height > 0 { contentHeight = height }
+            }
+    }
+}
+
 // MARK: - Row Height Estimation
 
 extension AgentSession {
     /// Estimated row height matching `IslandSessionRow` layout for viewport sizing.
     func estimatedIslandRowHeight(at date: Date) -> CGFloat {
         let presence = islandPresence(at: date)
-        // Base: vertical padding (24) + headline (~18) + rounding (2)
-        var height: CGFloat = 44
+        // Base: vertical padding (28) + headline (~18) + rounding (2)
+        var height: CGFloat = 48
         guard presence != .inactive else { return height }
-        if spotlightPromptLineText != nil { height += 22 }   // spacing (6) + text (16)
-        if spotlightActivityLineText != nil { height += 20 }  // spacing (6) + text (14)
+        if spotlightPromptLineText != nil { height += 24 }   // spacing (8) + text (16)
+        if spotlightActivityLineText != nil { height += 22 }  // spacing (8) + text (14)
         if let subagents = claudeMetadata?.activeSubagents, !subagents.isEmpty {
-            height += 20  // spacing (6) + header (14)
+            height += 22  // spacing (8) + header (14)
             height += CGFloat(subagents.count) * 18  // each subagent row (spacing 4 + text 14)
         }
         if let tasks = claudeMetadata?.activeTasks, !tasks.isEmpty {
-            height += 18  // spacing (6) + summary (12)
+            height += 20  // spacing (8) + summary (12)
             height += CGFloat(tasks.count) * 16  // each task row (spacing 3 + text 13)
         }
         return height
@@ -54,7 +102,6 @@ private struct ConditionalDrawingGroup: ViewModifier {
 // MARK: - Main island view
 
 struct IslandPanelView: View {
-    private static let maxVisibleSessionRows = 6
     private static let headerControlButtonSize: CGFloat = 22
     private static let headerControlSpacing: CGFloat = 8
     private static let headerHorizontalPadding: CGFloat = 18
@@ -364,7 +411,7 @@ struct IslandPanelView: View {
         VStack(spacing: 0) {
             if model.shouldShowSessionBootstrapPlaceholder {
                 sessionBootstrapPlaceholder
-            } else if displayedSessions.isEmpty {
+            } else if model.islandListSessions.isEmpty {
                 emptyState
             } else {
                 sessionList
@@ -418,103 +465,63 @@ struct IslandPanelView: View {
         model.notchOpenReason == .notification && actionableSessionID != nil
     }
 
+    private static let maxSessionListHeight: CGFloat = 560
+
     private var sessionList: some View {
         TimelineView(.periodic(from: .now, by: 30)) { context in
-            ScrollView(.vertical, showsIndicators: false) {
-                VStack(spacing: 4) {
-                    if isNotificationMode {
-                        // Notification mode: only show the actionable session
-                        if let session = model.activeIslandCardSession {
-                            IslandSessionRow(
-                                session: session,
-                                referenceDate: context.date,
-                                isActionable: true,
-                                useDrawingGroup: model.notchStatus == .opened,
-                                isInteractive: model.notchStatus == .opened,
-                                onApprove: { model.approvePermission(for: session.id, mode: $0) },
-                                onAnswer: { model.answerQuestion(for: session.id, answer: $0) },
-                                onJump: { model.jumpToSession(session) }
-                            )
-                        }
-
-                        // Footer to expand to full list
-                        if totalSessionCount > 1 {
-                            Button {
-                                let isCompletion = model.activeIslandCardSession?.phase == .completed
-                                model.expandNotificationToSessionList(clearExpansion: isCompletion)
-                            } label: {
-                                Text("显示全部 \(totalSessionCount) 个会话")
-                                    .font(.system(size: 11, weight: .medium))
-                                    .foregroundStyle(.white.opacity(0.45))
-                                    .frame(maxWidth: .infinity)
-                                    .padding(.vertical, 8)
-                            }
-                            .buttonStyle(.plain)
-                        }
-                    } else {
-                        // List mode: show all sessions
-                        ForEach(displayedSessions) { session in
-                            IslandSessionRow(
-                                session: session,
-                                referenceDate: context.date,
-                                isActionable: session.id == actionableSessionID,
-                                useDrawingGroup: model.notchStatus == .opened,
-                                isInteractive: model.notchStatus == .opened,
-                                onApprove: { model.approvePermission(for: session.id, mode: $0) },
-                                onAnswer: { model.answerQuestion(for: session.id, answer: $0) },
-                                onJump: { model.jumpToSession(session) }
-                            )
-                        }
-
-                        if totalSessionCount > displayedSessions.count {
-                            Button {
-                                model.showsAllSessions.toggle()
-                            } label: {
-                                Text(model.showsAllSessions
-                                    ? "收起列表"
-                                    : "显示全部 \(totalSessionCount) 个会话")
-                                    .font(.system(size: 11, weight: .medium))
-                                    .foregroundStyle(.white.opacity(0.45))
-                                    .frame(maxWidth: .infinity)
-                                    .padding(.vertical, 8)
-                            }
-                            .buttonStyle(.plain)
-                        }
-                    }
-                }
+            ScrollView(.vertical) {
+                sessionListContent(context: context)
             }
+            .scrollIndicators(.automatic, axes: .vertical)
+            .scrollContentBackground(.hidden)
+            .frame(maxHeight: Self.maxSessionListHeight)
             .padding(.vertical, 2)
-            .frame(
-                maxHeight: sessionListViewportHeight(
-                    referenceDate: context.date,
-                    sessions: sessionListViewportSessions(at: context.date)
-                ),
-                alignment: .top
-            )
         }
     }
 
-    private var displayedSessions: [AgentSession] {
-        model.showsAllSessions ? model.allSessions : model.islandListSessions
-    }
+    @ViewBuilder
+    private func sessionListContent(context: TimelineViewDefaultContext) -> some View {
+        VStack(spacing: 6) {
+            if isNotificationMode, let session = model.activeIslandCardSession {
+                IslandSessionRow(
+                    session: session,
+                    referenceDate: context.date,
+                    isActionable: true,
+                    useDrawingGroup: model.notchStatus == .opened,
+                    isInteractive: model.notchStatus == .opened,
+                    onApprove: { model.approvePermission(for: session.id, mode: $0) },
+                    onAnswer: { model.answerQuestion(for: session.id, answer: $0) },
+                    onJump: { model.jumpToSession(session) }
+                )
 
-    private var totalSessionCount: Int {
-        model.allSessions.count
-    }
-
-    private func sessionListViewportSessions(at referenceDate: Date) -> [AgentSession] {
-        Array(displayedSessions.prefix(Self.maxVisibleSessionRows))
-    }
-
-    private func sessionListViewportHeight(
-        referenceDate: Date,
-        sessions: [AgentSession]
-    ) -> CGFloat {
-        let rowHeights = sessions.map { $0.estimatedIslandRowHeight(at: referenceDate) }
-
-        let rowsHeight = rowHeights.reduce(CGFloat.zero, +)
-        let spacingHeight = CGFloat(max(0, rowHeights.count - 1)) * 4
-        return rowsHeight + spacingHeight + 4
+                if model.allSessions.count > 1 {
+                    Button {
+                        let isCompletion = session.phase == .completed
+                        model.expandNotificationToSessionList(clearExpansion: isCompletion)
+                    } label: {
+                        Text("显示全部 \(model.allSessions.count) 个会话")
+                            .font(.system(size: 11, weight: .medium))
+                            .foregroundStyle(.white.opacity(0.45))
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 8)
+                    }
+                    .buttonStyle(.plain)
+                }
+            } else {
+                ForEach(model.islandListSessions) { session in
+                    IslandSessionRow(
+                        session: session,
+                        referenceDate: context.date,
+                        isActionable: session.id == actionableSessionID,
+                        useDrawingGroup: model.notchStatus == .opened,
+                        isInteractive: model.notchStatus == .opened,
+                        onApprove: { model.approvePermission(for: session.id, mode: $0) },
+                        onAnswer: { model.answerQuestion(for: session.id, answer: $0) },
+                        onJump: { model.jumpToSession(session) }
+                    )
+                }
+            }
+        }
     }
 
     // MARK: - Helpers
@@ -941,13 +948,14 @@ private struct IslandSessionRow: View {
     }
 
     private func rowBody(referenceDate: Date) -> some View {
-        let presence = session.islandPresence(at: referenceDate)
-        let showsExpandedContent = presence != .inactive || isManuallyExpanded
+        let rawPresence = session.islandPresence(at: referenceDate)
+        let presence = (rawPresence == .inactive && isManuallyExpanded) ? .active : rawPresence
+        let showsExpandedContent = presence != .inactive
         return VStack(alignment: .leading, spacing: 0) {
             HStack(alignment: .top, spacing: 14) {
                 statusDot(for: presence)
 
-                VStack(alignment: .leading, spacing: 6) {
+                VStack(alignment: .leading, spacing: 8) {
                     HStack(alignment: .top, spacing: 12) {
                         Text(session.spotlightHeadlineText)
                             .font(.system(size: isActionable ? 15 : 14, weight: .semibold))
@@ -966,17 +974,15 @@ private struct IslandSessionRow: View {
                     }
 
                     if showsExpandedContent || isActionable,
-                       let promptLine = isActionable
-                        ? session.notificationHeaderPromptLineText
-                        : session.spotlightPromptLineText {
+                       let promptLine = session.spotlightPromptLineText ?? expandedPromptLineText {
                         Text(promptLine)
-                            .font(.system(size: isActionable ? 12 : 11.5, weight: .medium))
-                            .foregroundStyle(.white.opacity(isActionable ? 0.66 : 0.62))
-                            .lineLimit(isActionable ? 2 : 1)
+                            .font(.system(size: 11.5, weight: .medium))
+                            .foregroundStyle(.white.opacity(0.62))
+                            .lineLimit(1)
                     }
 
-                    if !isActionable, showsExpandedContent,
-                       let activityLine = session.spotlightActivityLineText {
+                    if showsExpandedContent || isActionable,
+                       let activityLine = session.spotlightActivityLineText ?? expandedActivityLineText {
                         Text(activityLine)
                             .font(.system(size: 11, weight: .medium))
                             .foregroundStyle(activityColor(for: presence).opacity(0.94))
@@ -1052,8 +1058,8 @@ private struct IslandSessionRow: View {
                     }
                 }
             }
-            .padding(.horizontal, isActionable ? 16 : 14)
-            .padding(.vertical, isActionable ? 14 : 12)
+            .padding(.horizontal, isActionable ? 16 : 16)
+            .padding(.vertical, isActionable ? 14 : 14)
 
             if isActionable {
                 actionableBody
@@ -1087,6 +1093,11 @@ private struct IslandSessionRow: View {
             guard isInteractive else { return }
             withAnimation(.easeInOut(duration: 0.15)) {
                 isHighlighted = hovering
+            }
+        }
+        .onChange(of: isInteractive) { _, interactive in
+            if !interactive {
+                isManuallyExpanded = false
             }
         }
     }
@@ -1203,20 +1214,16 @@ private struct IslandSessionRow: View {
             .padding(.horizontal, 14)
             .padding(.vertical, 12)
 
-            if !completionMessageText.isEmpty {
-                Rectangle()
-                    .fill(.white.opacity(0.04))
-                    .frame(height: 1)
+            Rectangle()
+                .fill(.white.opacity(0.04))
+                .frame(height: 1)
 
-                ScrollView(.vertical) {
-                    Markdown(completionMessageText)
-                        .markdownTheme(.completionCard)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .padding(.horizontal, 14)
-                        .padding(.vertical, 14)
-                }
-                .scrollIndicators(.visible)
-                .frame(maxHeight: 260)
+            AutoHeightScrollView(maxHeight: 260) {
+                Markdown(completionMessageText)
+                    .markdownTheme(.completionCard)
+                    .frame(maxWidth: .infinity, alignment: .topLeading)
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 10)
             }
         }
         .background(
@@ -1314,9 +1321,26 @@ private struct IslandSessionRow: View {
             .padding(.top, 6)
     }
 
+    /// Prompt line for manually expanded inactive rows (bypasses time-based filter).
+    private var expandedPromptLineText: String? {
+        guard isManuallyExpanded, let prompt = session.spotlightPromptText else { return nil }
+        return "You: \(prompt)"
+    }
+
+    /// Activity line for manually expanded inactive rows (bypasses time-based filter).
+    private var expandedActivityLineText: String? {
+        guard isManuallyExpanded else { return nil }
+        let trimmed = session.lastAssistantMessageText?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        if let assistantMessage = trimmed, !assistantMessage.isEmpty {
+            return assistantMessage
+        }
+        return session.jumpTarget != nil ? "Ready" : "Completed"
+    }
+
     private func handlePrimaryTap() {
-        let presence = session.islandPresence(at: referenceDate)
-        if presence == .inactive && !isManuallyExpanded {
+        let rawPresence = session.islandPresence(at: referenceDate)
+        if rawPresence == .inactive && !isManuallyExpanded {
             withAnimation(.easeInOut(duration: 0.2)) {
                 isManuallyExpanded = true
             }

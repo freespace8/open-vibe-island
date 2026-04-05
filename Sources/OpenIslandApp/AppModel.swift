@@ -224,6 +224,15 @@ final class AppModel {
         state.sessions
     }
 
+    /// Measured by SwiftUI GeometryReader in notification mode. Used by panel controller for sizing.
+    var measuredNotificationContentHeight: CGFloat = 0 {
+        didSet {
+            if measuredNotificationContentHeight != oldValue, measuredNotificationContentHeight > 0 {
+                overlay.refreshOverlayPlacementIfVisible()
+            }
+        }
+    }
+
     var surfacedSessions: [AgentSession] {
         sessionBuckets.primary
     }

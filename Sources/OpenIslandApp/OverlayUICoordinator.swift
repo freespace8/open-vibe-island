@@ -124,6 +124,7 @@ final class OverlayUICoordinator {
             },
             afterStateChange: { [weak self] in
                 self?.autoCollapseSurfaceHasBeenEntered = false
+                self?.appModel?.measuredNotificationContentHeight = 0
             }
         )
     }
@@ -152,15 +153,19 @@ final class OverlayUICoordinator {
         overlayTransitionGeneration &+= 1
         let capturedGeneration = overlayTransitionGeneration
         DispatchQueue.main.async { [weak self] in
-            guard let self, self.overlayTransitionGeneration == capturedGeneration else { return }
+            guard let self else { return }
             switch status {
             case .opened:
-                guard let appModel else { return }
+                // Guard open transitions with generation to prevent stale opens.
+                guard self.overlayTransitionGeneration == capturedGeneration,
+                      let appModel else { return }
                 self.overlayPlacementDiagnostics = self.overlayPanelController.show(
                     model: appModel,
                     preferredScreenID: self.preferredOverlayScreenID
                 )
             case .closed, .popping:
+                // Always execute close reposition — the panel must shrink back
+                // even if another transition was queued between Phase 1 and Phase 2.
                 self.refreshOverlayPlacement()
             }
             onPlacementResolved?()
