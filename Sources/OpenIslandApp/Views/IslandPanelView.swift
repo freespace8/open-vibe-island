@@ -35,6 +35,18 @@ private struct ClosedPresenceKey: Equatable {
     var width: CGFloat
 }
 
+private struct ConditionalDrawingGroup: ViewModifier {
+    let enabled: Bool
+
+    func body(content: Content) -> some View {
+        if enabled {
+            content.drawingGroup()
+        } else {
+            content
+        }
+    }
+}
+
 // MARK: - Main island view
 
 struct IslandPanelView: View {
@@ -406,6 +418,8 @@ struct IslandPanelView: View {
                             session: session,
                             referenceDate: context.date,
                             isActionable: session.id == actionableSessionID,
+                            useDrawingGroup: model.notchStatus == .opened,
+                            isInteractive: model.notchStatus == .opened,
                             onApprove: { model.approvePermission(for: session.id, mode: $0) },
                             onAnswer: { model.answerQuestion(for: session.id, answer: $0) },
                             onJump: { model.jumpToSession(session) }
@@ -872,6 +886,8 @@ private struct IslandSessionRow: View {
     let session: AgentSession
     let referenceDate: Date
     var isActionable: Bool = false
+    var useDrawingGroup: Bool = true
+    var isInteractive: Bool = true
     var onApprove: ((ClaudePermissionMode?) -> Void)?
     var onAnswer: ((QuestionPromptResponse) -> Void)?
     let onJump: () -> Void
@@ -988,10 +1004,11 @@ private struct IslandSessionRow: View {
             },
             alignment: .bottom
         )
-        .drawingGroup()
+        .modifier(ConditionalDrawingGroup(enabled: useDrawingGroup))
         .contentShape(RoundedRectangle(cornerRadius: isActionable ? 24 : 22, style: .continuous))
         .onTapGesture(perform: handlePrimaryTap)
         .onHover { hovering in
+            guard isInteractive else { return }
             withAnimation(.easeInOut(duration: 0.15)) {
                 isHighlighted = hovering
             }
