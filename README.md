@@ -16,6 +16,12 @@
   <a href="#contributing">Contributing</a>
 </p>
 
+<p align="center">
+  <a href="https://github.com/Octane0411/open-vibe-island/releases/latest"><img src="https://img.shields.io/github/v/release/Octane0411/open-vibe-island?style=flat-square&label=release&color=blue" alt="Latest Release"></a>
+  <a href="https://discord.gg/4ackNAutyY"><img src="https://img.shields.io/discord/4ackNAutyY?style=flat-square&logo=discord&label=discord&color=5865F2" alt="Discord"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-GPL%20v3-green?style=flat-square" alt="License: GPL v3"></a>
+</p>
+
 ---
 
 ## Human Parts
