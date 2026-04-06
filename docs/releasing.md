@@ -84,10 +84,10 @@ All release notes **must be bilingual** (English + Simplified Chinese). Use the 
 
    **Method 2 (Terminal) | 方法二（终端）：**
    ```bash
-   xattr -cr /Applications/Open\ Island.app
+   xattr -dr com.apple.quarantine "/Applications/Open Island.app"
    ```
 
-3. Requirements: **macOS 14+**, **Apple Silicon** (M1/M2/M3/M4).
+3. Requirements: **macOS 14+**, **Apple Silicon** (M1/M2/M3/M4/M5).
    系统要求：**macOS 14+**，**Apple Silicon**（M1/M2/M3/M4）。
 
 > ⚠️ **Note**: This is an unsigned early-access build. Code signing and notarization will be added once our Apple Developer account is approved.
