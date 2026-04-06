@@ -67,7 +67,8 @@ public struct SessionState: Equatable, Sendable {
                 updatedAt: payload.timestamp,
                 jumpTarget: payload.jumpTarget,
                 codexMetadata: payload.codexMetadata?.isEmpty == true ? nil : payload.codexMetadata,
-                claudeMetadata: payload.claudeMetadata?.isEmpty == true ? nil : payload.claudeMetadata
+                claudeMetadata: payload.claudeMetadata?.isEmpty == true ? nil : payload.claudeMetadata,
+                openCodeMetadata: payload.openCodeMetadata?.isEmpty == true ? nil : payload.openCodeMetadata
             )
             session.isProcessAlive = true
             session.processNotSeenCount = 0
@@ -163,6 +164,15 @@ public struct SessionState: Equatable, Sendable {
             session.updatedAt = payload.timestamp
             upsert(session)
 
+        case let .openCodeSessionMetadataUpdated(payload):
+            guard var session = sessionsByID[payload.sessionID] else {
+                return
+            }
+
+            session.openCodeMetadata = payload.openCodeMetadata.isEmpty ? nil : payload.openCodeMetadata
+            session.updatedAt = payload.timestamp
+            upsert(session)
+
         case let .actionableStateResolved(payload):
             guard var session = sessionsByID[payload.sessionID] else {
                 return
@@ -195,14 +205,24 @@ public struct SessionState: Equatable, Sendable {
 
         if resolution.isApproved {
             session.phase = .running
-            session.summary = session.tool == .claudeCode
-                ? "Permission approved. Claude continued the tool."
-                : "Permission approved. Agent resumed work."
+            switch session.tool {
+            case .claudeCode:
+                session.summary = "Permission approved. Claude continued the tool."
+            case .openCode:
+                session.summary = "Permission approved. OpenCode continued the tool."
+            default:
+                session.summary = "Permission approved. Agent resumed work."
+            }
         } else {
             session.phase = .completed
-            session.summary = session.tool == .claudeCode
-                ? "Permission denied in Open Island."
-                : "Permission denied. Review the session in the terminal."
+            switch session.tool {
+            case .claudeCode:
+                session.summary = "Permission denied in Open Island."
+            case .openCode:
+                session.summary = "Permission denied in Open Island."
+            default:
+                session.summary = "Permission denied. Review the session in the terminal."
+            }
         }
 
         upsert(session)

@@ -4,6 +4,7 @@ public enum AgentTool: String, CaseIterable, Codable, Sendable {
     case claudeCode
     case codex
     case geminiCLI
+    case openCode
 
     public var displayName: String {
         switch self {
@@ -13,6 +14,8 @@ public enum AgentTool: String, CaseIterable, Codable, Sendable {
             "Codex"
         case .geminiCLI:
             "Gemini CLI"
+        case .openCode:
+            "OpenCode"
         }
     }
 
@@ -24,6 +27,8 @@ public enum AgentTool: String, CaseIterable, Codable, Sendable {
             "CODEX"
         case .geminiCLI:
             "GEMINI"
+        case .openCode:
+            "OPENCODE"
         }
     }
 }
@@ -267,6 +272,7 @@ public struct AgentSession: Equatable, Identifiable, Codable, Sendable {
     public var jumpTarget: JumpTarget?
     public var codexMetadata: CodexSessionMetadata?
     public var claudeMetadata: ClaudeSessionMetadata?
+    public var openCodeMetadata: OpenCodeSessionMetadata?
 
     /// Whether the agent process is currently alive according to process discovery.
     /// Populated in parallel with the existing attachment system during Phase 1.
@@ -290,7 +296,8 @@ public struct AgentSession: Equatable, Identifiable, Codable, Sendable {
         questionPrompt: QuestionPrompt? = nil,
         jumpTarget: JumpTarget? = nil,
         codexMetadata: CodexSessionMetadata? = nil,
-        claudeMetadata: ClaudeSessionMetadata? = nil
+        claudeMetadata: ClaudeSessionMetadata? = nil,
+        openCodeMetadata: OpenCodeSessionMetadata? = nil
     ) {
         self.id = id
         self.title = title
@@ -305,6 +312,7 @@ public struct AgentSession: Equatable, Identifiable, Codable, Sendable {
         self.jumpTarget = jumpTarget
         self.codexMetadata = codexMetadata
         self.claudeMetadata = claudeMetadata
+        self.openCodeMetadata = openCodeMetadata
     }
 
     private enum CodingKeys: String, CodingKey {
@@ -321,6 +329,7 @@ public struct AgentSession: Equatable, Identifiable, Codable, Sendable {
         case jumpTarget
         case codexMetadata
         case claudeMetadata
+        case openCodeMetadata
     }
 
     public init(from decoder: any Decoder) throws {
@@ -338,6 +347,7 @@ public struct AgentSession: Equatable, Identifiable, Codable, Sendable {
         jumpTarget = try container.decodeIfPresent(JumpTarget.self, forKey: .jumpTarget)
         codexMetadata = try container.decodeIfPresent(CodexSessionMetadata.self, forKey: .codexMetadata)
         claudeMetadata = try container.decodeIfPresent(ClaudeSessionMetadata.self, forKey: .claudeMetadata)
+        openCodeMetadata = try container.decodeIfPresent(OpenCodeSessionMetadata.self, forKey: .openCodeMetadata)
     }
 
     public func encode(to encoder: any Encoder) throws {
@@ -355,6 +365,7 @@ public struct AgentSession: Equatable, Identifiable, Codable, Sendable {
         try container.encodeIfPresent(jumpTarget, forKey: .jumpTarget)
         try container.encodeIfPresent(codexMetadata, forKey: .codexMetadata)
         try container.encodeIfPresent(claudeMetadata, forKey: .claudeMetadata)
+        try container.encodeIfPresent(openCodeMetadata, forKey: .openCodeMetadata)
     }
 }
 
@@ -364,7 +375,7 @@ public extension AgentSession {
     }
 
     var isTrackedLiveSession: Bool {
-        !isDemoSession && (tool == .codex || tool == .claudeCode)
+        !isDemoSession && (tool == .codex || tool == .claudeCode || tool == .openCode)
     }
 
     var isTrackedLiveCodexSession: Bool {
@@ -385,11 +396,11 @@ public extension AgentSession {
     }
 
     var currentToolName: String? {
-        codexMetadata?.currentTool ?? claudeMetadata?.currentTool
+        codexMetadata?.currentTool ?? claudeMetadata?.currentTool ?? openCodeMetadata?.currentTool
     }
 
     var lastAssistantMessageText: String? {
-        codexMetadata?.lastAssistantMessage ?? claudeMetadata?.lastAssistantMessage
+        codexMetadata?.lastAssistantMessage ?? claudeMetadata?.lastAssistantMessage ?? openCodeMetadata?.lastAssistantMessage
     }
 
     var trackingTranscriptPath: String? {
@@ -397,14 +408,14 @@ public extension AgentSession {
     }
 
     var latestUserPromptText: String? {
-        codexMetadata?.lastUserPrompt ?? claudeMetadata?.lastUserPrompt
+        codexMetadata?.lastUserPrompt ?? claudeMetadata?.lastUserPrompt ?? openCodeMetadata?.lastUserPrompt
     }
 
     var initialUserPromptText: String? {
-        codexMetadata?.initialUserPrompt ?? claudeMetadata?.initialUserPrompt
+        codexMetadata?.initialUserPrompt ?? claudeMetadata?.initialUserPrompt ?? openCodeMetadata?.initialUserPrompt
     }
 
     var currentCommandPreviewText: String? {
-        codexMetadata?.currentCommandPreview ?? claudeMetadata?.currentToolInputPreview
+        codexMetadata?.currentCommandPreview ?? claudeMetadata?.currentToolInputPreview ?? openCodeMetadata?.currentToolInputPreview
     }
 }

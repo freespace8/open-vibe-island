@@ -549,6 +549,8 @@ public enum ClaudeHookOutputEncoder {
             data = nil
         case .codexHookDirective:
             data = nil
+        case .openCodeHookDirective:
+            data = nil
         case let .claudeHookDirective(directive):
             switch directive {
             case let .preToolUse(payload):

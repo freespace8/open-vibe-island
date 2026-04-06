@@ -11,6 +11,7 @@ public struct SessionStarted: Equatable, Codable, Sendable {
     public var jumpTarget: JumpTarget?
     public var codexMetadata: CodexSessionMetadata?
     public var claudeMetadata: ClaudeSessionMetadata?
+    public var openCodeMetadata: OpenCodeSessionMetadata?
 
     public init(
         sessionID: String,
@@ -22,7 +23,8 @@ public struct SessionStarted: Equatable, Codable, Sendable {
         timestamp: Date,
         jumpTarget: JumpTarget? = nil,
         codexMetadata: CodexSessionMetadata? = nil,
-        claudeMetadata: ClaudeSessionMetadata? = nil
+        claudeMetadata: ClaudeSessionMetadata? = nil,
+        openCodeMetadata: OpenCodeSessionMetadata? = nil
     ) {
         self.sessionID = sessionID
         self.title = title
@@ -34,6 +36,7 @@ public struct SessionStarted: Equatable, Codable, Sendable {
         self.jumpTarget = jumpTarget
         self.codexMetadata = codexMetadata
         self.claudeMetadata = claudeMetadata
+        self.openCodeMetadata = openCodeMetadata
     }
 }
 
@@ -155,6 +158,22 @@ public struct ClaudeSessionMetadataUpdated: Equatable, Codable, Sendable {
     }
 }
 
+public struct OpenCodeSessionMetadataUpdated: Equatable, Codable, Sendable {
+    public var sessionID: String
+    public var openCodeMetadata: OpenCodeSessionMetadata
+    public var timestamp: Date
+
+    public init(
+        sessionID: String,
+        openCodeMetadata: OpenCodeSessionMetadata,
+        timestamp: Date
+    ) {
+        self.sessionID = sessionID
+        self.openCodeMetadata = openCodeMetadata
+        self.timestamp = timestamp
+    }
+}
+
 public struct ActionableStateResolved: Equatable, Codable, Sendable {
     public var sessionID: String
     public var summary: String
@@ -180,6 +199,7 @@ public enum AgentEvent: Equatable, Codable, Sendable {
     case jumpTargetUpdated(JumpTargetUpdated)
     case sessionMetadataUpdated(SessionMetadataUpdated)
     case claudeSessionMetadataUpdated(ClaudeSessionMetadataUpdated)
+    case openCodeSessionMetadataUpdated(OpenCodeSessionMetadataUpdated)
     case actionableStateResolved(ActionableStateResolved)
 
     private enum CodingKeys: String, CodingKey {
@@ -192,6 +212,7 @@ public enum AgentEvent: Equatable, Codable, Sendable {
         case jumpTargetUpdated
         case sessionMetadataUpdated
         case claudeSessionMetadataUpdated
+        case openCodeSessionMetadataUpdated
         case actionableStateResolved
     }
 
@@ -204,6 +225,7 @@ public enum AgentEvent: Equatable, Codable, Sendable {
         case jumpTargetUpdated
         case sessionMetadataUpdated
         case claudeSessionMetadataUpdated
+        case openCodeSessionMetadataUpdated
         case actionableStateResolved
     }
 
@@ -229,6 +251,10 @@ public enum AgentEvent: Equatable, Codable, Sendable {
         case .claudeSessionMetadataUpdated:
             self = .claudeSessionMetadataUpdated(
                 try container.decode(ClaudeSessionMetadataUpdated.self, forKey: .claudeSessionMetadataUpdated)
+            )
+        case .openCodeSessionMetadataUpdated:
+            self = .openCodeSessionMetadataUpdated(
+                try container.decode(OpenCodeSessionMetadataUpdated.self, forKey: .openCodeSessionMetadataUpdated)
             )
         case .actionableStateResolved:
             self = .actionableStateResolved(
@@ -265,6 +291,9 @@ public enum AgentEvent: Equatable, Codable, Sendable {
         case let .claudeSessionMetadataUpdated(payload):
             try container.encode(EventType.claudeSessionMetadataUpdated, forKey: .type)
             try container.encode(payload, forKey: .claudeSessionMetadataUpdated)
+        case let .openCodeSessionMetadataUpdated(payload):
+            try container.encode(EventType.openCodeSessionMetadataUpdated, forKey: .type)
+            try container.encode(payload, forKey: .openCodeSessionMetadataUpdated)
         case let .actionableStateResolved(payload):
             try container.encode(EventType.actionableStateResolved, forKey: .type)
             try container.encode(payload, forKey: .actionableStateResolved)

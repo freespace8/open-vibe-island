@@ -938,6 +938,12 @@ final class AppModel {
             }
 
             return payload.claudeMetadata.lastAssistantMessage ?? "Claude session metadata updated."
+        case let .openCodeSessionMetadataUpdated(payload):
+            if let currentTool = payload.openCodeMetadata.currentTool {
+                return "OpenCode is running \(currentTool)."
+            }
+
+            return payload.openCodeMetadata.lastAssistantMessage ?? "OpenCode session metadata updated."
         case let .actionableStateResolved(payload):
             return "Actionable state resolved for session \(payload.sessionID)."
         }

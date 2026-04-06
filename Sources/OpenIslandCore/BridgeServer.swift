@@ -31,6 +31,16 @@ public final class BridgeServer: @unchecked Sendable {
         let kind: Kind
     }
 
+    private struct PendingOpenCodeInteraction {
+        enum Kind {
+            case permission(OpenCodeHookPayload)
+            case question(OpenCodeHookPayload)
+        }
+
+        let clientID: UUID
+        let kind: Kind
+    }
+
     private let socketURL: URL
     private let queue = DispatchQueue(label: "app.openisland.bridge.server")
     private let queueKey = DispatchSpecificKey<Void>()
@@ -41,6 +51,7 @@ public final class BridgeServer: @unchecked Sendable {
     private var pendingApprovals: [String: PendingApproval] = [:]
     private var pendingClaudeToolContexts: [String: PendingClaudeToolContext] = [:]
     private var pendingClaudeInteractions: [String: PendingClaudeInteraction] = [:]
+    private var pendingOpenCodeInteractions: [String: PendingOpenCodeInteraction] = [:]
     /// Caches Agent tool description from preToolUse for use by the next subagentStart.
     private var pendingAgentDescriptions: [String: String] = [:]
     private var stateSnapshot = SessionState()
@@ -147,6 +158,7 @@ public final class BridgeServer: @unchecked Sendable {
         pendingApprovals.removeAll()
         pendingClaudeInteractions.removeAll()
         pendingClaudeToolContexts.removeAll()
+        pendingOpenCodeInteractions.removeAll()
 
         let activeConnections = Array(clients.values)
         activeConnections.forEach { $0.readSource.cancel() }
@@ -303,6 +315,12 @@ public final class BridgeServer: @unchecked Sendable {
                 return
             }
 
+            if pendingOpenCodeInteractions[sessionID] != nil {
+                resolvePendingOpenCodeInteraction(sessionID: sessionID, resolution: resolution)
+                send(.response(.acknowledged), to: clientID)
+                return
+            }
+
             localState.resolvePermission(sessionID: sessionID, resolution: resolution)
             broadcast([.event(
                 resolution.isApproved
@@ -332,6 +350,12 @@ public final class BridgeServer: @unchecked Sendable {
                 return
             }
 
+            if pendingOpenCodeInteractions[sessionID] != nil {
+                resolvePendingOpenCodeQuestion(sessionID: sessionID, response: response)
+                send(.response(.acknowledged), to: clientID)
+                return
+            }
+
             let summary = response.displaySummary.isEmpty
                 ? "Answered the question."
                 : "Answered: \(response.displaySummary)"
@@ -352,6 +376,9 @@ public final class BridgeServer: @unchecked Sendable {
 
         case let .processClaudeHook(payload):
             handleClaudeHook(payload, from: clientID)
+
+        case let .processOpenCodeHook(payload):
+            handleOpenCodeHook(payload, from: clientID)
         }
     }
 
@@ -820,7 +847,403 @@ public final class BridgeServer: @unchecked Sendable {
         }
     }
 
+    private func handleOpenCodeHook(_ payload: OpenCodeHookPayload, from clientID: UUID) {
+        switch payload.hookEventName {
+        case .sessionStart:
+            clearStaleOpenCodeInteractionIfNeeded(for: payload.sessionID)
+            emit(
+                .sessionStarted(
+                    SessionStarted(
+                        sessionID: payload.sessionID,
+                        title: payload.sessionTitle,
+                        tool: .openCode,
+                        origin: .live,
+                        initialPhase: .completed,
+                        summary: payload.implicitStartSummary,
+                        timestamp: .now,
+                        jumpTarget: payload.defaultJumpTarget,
+                        openCodeMetadata: payload.defaultOpenCodeMetadata.isEmpty ? nil : payload.defaultOpenCodeMetadata
+                    )
+                )
+            )
+            send(.response(.acknowledged), to: clientID)
 
+        case .userPromptSubmit:
+            clearStaleOpenCodeInteractionIfNeeded(for: payload.sessionID)
+            ensureOpenCodeSessionExists(for: payload)
+            synchronizeOpenCodeJumpTarget(for: payload)
+            synchronizeOpenCodeMetadata(for: payload)
+            emit(
+                .activityUpdated(
+                    SessionActivityUpdated(
+                        sessionID: payload.sessionID,
+                        summary: payload.promptPreview.map { "Prompt: \($0)" } ?? payload.implicitStartSummary,
+                        phase: .running,
+                        timestamp: .now
+                    )
+                )
+            )
+            send(.response(.acknowledged), to: clientID)
+
+        case .preToolUse:
+            clearStaleOpenCodeInteractionIfNeeded(for: payload.sessionID)
+            ensureOpenCodeSessionExists(for: payload)
+            synchronizeOpenCodeJumpTarget(for: payload)
+            synchronizeOpenCodeMetadata(for: payload)
+            let summary = payload.toolName.map { "Running \($0)" } ?? "Running OpenCode tool"
+            emit(
+                .activityUpdated(
+                    SessionActivityUpdated(
+                        sessionID: payload.sessionID,
+                        summary: payload.toolInputPreview.map { "\(summary): \($0)" } ?? summary,
+                        phase: .running,
+                        timestamp: .now
+                    )
+                )
+            )
+            send(.response(.acknowledged), to: clientID)
+
+        case .postToolUse:
+            clearStaleOpenCodeInteractionIfNeeded(for: payload.sessionID)
+            ensureOpenCodeSessionExists(for: payload)
+            synchronizeOpenCodeJumpTarget(for: payload)
+            synchronizeOpenCodeMetadata(for: payload)
+            let summary = payload.toolName.map { "\($0) finished." } ?? "OpenCode tool finished."
+            emit(
+                .activityUpdated(
+                    SessionActivityUpdated(
+                        sessionID: payload.sessionID,
+                        summary: summary,
+                        phase: .running,
+                        timestamp: .now
+                    )
+                )
+            )
+            send(.response(.acknowledged), to: clientID)
+
+        case .permissionRequest:
+            ensureOpenCodeSessionExists(for: payload)
+            synchronizeOpenCodeJumpTarget(for: payload)
+            synchronizeOpenCodeMetadata(for: payload)
+
+            emit(
+                .permissionRequested(
+                    PermissionRequested(
+                        sessionID: payload.sessionID,
+                        request: PermissionRequest(
+                            title: payload.permissionTitle ?? payload.toolName.map { "Allow \($0)" } ?? "Allow OpenCode tool",
+                            summary: payload.permissionDescription ?? "OpenCode needs permission to continue.",
+                            affectedPath: payload.toolInputPreview ?? payload.cwd,
+                            primaryActionTitle: "Allow",
+                            secondaryActionTitle: "Deny",
+                            toolName: payload.toolName
+                        ),
+                        timestamp: .now
+                    )
+                )
+            )
+
+            pendingOpenCodeInteractions[payload.sessionID] = PendingOpenCodeInteraction(
+                clientID: clientID,
+                kind: .permission(payload)
+            )
+
+        case .questionAsked:
+            ensureOpenCodeSessionExists(for: payload)
+            synchronizeOpenCodeJumpTarget(for: payload)
+            synchronizeOpenCodeMetadata(for: payload)
+
+            let questionTitle = payload.questionText ?? "OpenCode has a question for you."
+            emit(
+                .questionAsked(
+                    QuestionAsked(
+                        sessionID: payload.sessionID,
+                        prompt: QuestionPrompt(
+                            title: questionTitle,
+                            options: []
+                        ),
+                        timestamp: .now
+                    )
+                )
+            )
+
+            pendingOpenCodeInteractions[payload.sessionID] = PendingOpenCodeInteraction(
+                clientID: clientID,
+                kind: .question(payload)
+            )
+
+        case .stop:
+            clearStaleOpenCodeInteractionIfNeeded(for: payload.sessionID)
+            ensureOpenCodeSessionExists(for: payload)
+            synchronizeOpenCodeJumpTarget(for: payload)
+            synchronizeOpenCodeMetadata(for: payload)
+            emit(
+                .sessionCompleted(
+                    SessionCompleted(
+                        sessionID: payload.sessionID,
+                        summary: payload.lastAssistantMessage ?? payload.assistantMessagePreview ?? "OpenCode completed the turn.",
+                        timestamp: .now
+                    )
+                )
+            )
+            send(.response(.acknowledged), to: clientID)
+
+        case .sessionEnd:
+            clearStaleOpenCodeInteractionIfNeeded(for: payload.sessionID)
+            ensureOpenCodeSessionExists(for: payload)
+            synchronizeOpenCodeJumpTarget(for: payload)
+            synchronizeOpenCodeMetadata(for: payload)
+            emit(
+                .sessionCompleted(
+                    SessionCompleted(
+                        sessionID: payload.sessionID,
+                        summary: "OpenCode session ended.",
+                        timestamp: .now,
+                        isInterrupt: true
+                    )
+                )
+            )
+            send(.response(.acknowledged), to: clientID)
+        }
+    }
+
+    private func clearStaleOpenCodeInteractionIfNeeded(for sessionID: String) {
+        guard pendingOpenCodeInteractions.removeValue(forKey: sessionID) != nil else {
+            return
+        }
+
+        emit(
+            .actionableStateResolved(
+                ActionableStateResolved(
+                    sessionID: sessionID,
+                    summary: "Approval was handled outside Open Island.",
+                    timestamp: .now
+                )
+            )
+        )
+    }
+
+    private func ensureOpenCodeSessionExists(for payload: OpenCodeHookPayload) {
+        guard !hasSession(id: payload.sessionID) else {
+            return
+        }
+
+        emit(
+            .sessionStarted(
+                SessionStarted(
+                    sessionID: payload.sessionID,
+                    title: payload.sessionTitle,
+                    tool: .openCode,
+                    origin: .live,
+                    initialPhase: .completed,
+                    summary: payload.implicitStartSummary,
+                    timestamp: .now,
+                    jumpTarget: payload.defaultJumpTarget,
+                    openCodeMetadata: payload.defaultOpenCodeMetadata.isEmpty ? nil : payload.defaultOpenCodeMetadata
+                )
+            )
+        )
+    }
+
+    private func synchronizeOpenCodeJumpTarget(for payload: OpenCodeHookPayload) {
+        guard let existingSession = localState.session(id: payload.sessionID) else {
+            return
+        }
+
+        var jumpTarget = payload.defaultJumpTarget
+
+        if jumpTarget.terminalSessionID == nil,
+           let existingID = existingSession.jumpTarget?.terminalSessionID,
+           !existingID.isEmpty {
+            jumpTarget.terminalSessionID = existingID
+        }
+
+        guard existingSession.jumpTarget != jumpTarget else {
+            return
+        }
+
+        emit(
+            .jumpTargetUpdated(
+                JumpTargetUpdated(
+                    sessionID: payload.sessionID,
+                    jumpTarget: jumpTarget,
+                    timestamp: .now
+                )
+            )
+        )
+    }
+
+    private func synchronizeOpenCodeMetadata(for payload: OpenCodeHookPayload) {
+        guard let existingSession = localState.session(id: payload.sessionID) else {
+            return
+        }
+
+        let mergedMetadata = mergedOpenCodeMetadata(
+            existing: existingSession.openCodeMetadata,
+            update: payload.defaultOpenCodeMetadata,
+            hookEventName: payload.hookEventName
+        )
+        guard !mergedMetadata.isEmpty else {
+            return
+        }
+
+        guard existingSession.openCodeMetadata != mergedMetadata else {
+            return
+        }
+
+        emit(
+            .openCodeSessionMetadataUpdated(
+                OpenCodeSessionMetadataUpdated(
+                    sessionID: payload.sessionID,
+                    openCodeMetadata: mergedMetadata,
+                    timestamp: .now
+                )
+            )
+        )
+    }
+
+    private func mergedOpenCodeMetadata(
+        existing: OpenCodeSessionMetadata?,
+        update: OpenCodeSessionMetadata,
+        hookEventName: OpenCodeHookEventName
+    ) -> OpenCodeSessionMetadata {
+        OpenCodeSessionMetadata(
+            initialUserPrompt: existing?.initialUserPrompt ?? update.initialUserPrompt ?? update.lastUserPrompt,
+            lastUserPrompt: update.lastUserPrompt ?? existing?.lastUserPrompt,
+            lastAssistantMessage: update.lastAssistantMessage ?? existing?.lastAssistantMessage,
+            currentTool: mergedOpenCodeCurrentTool(
+                existing: existing?.currentTool,
+                update: update.currentTool,
+                hookEventName: hookEventName
+            ),
+            currentToolInputPreview: mergedOpenCodeCurrentToolInputPreview(
+                existing: existing?.currentToolInputPreview,
+                update: update.currentToolInputPreview,
+                hookEventName: hookEventName
+            ),
+            model: update.model ?? existing?.model
+        )
+    }
+
+    private func mergedOpenCodeCurrentTool(
+        existing: String?,
+        update: String?,
+        hookEventName: OpenCodeHookEventName
+    ) -> String? {
+        if let update {
+            return update
+        }
+
+        switch hookEventName {
+        case .postToolUse, .stop, .sessionEnd:
+            return nil
+        case .sessionStart, .userPromptSubmit, .preToolUse, .permissionRequest, .questionAsked:
+            return existing
+        }
+    }
+
+    private func mergedOpenCodeCurrentToolInputPreview(
+        existing: String?,
+        update: String?,
+        hookEventName: OpenCodeHookEventName
+    ) -> String? {
+        if let update {
+            return update
+        }
+
+        switch hookEventName {
+        case .postToolUse, .stop, .sessionEnd:
+            return nil
+        case .sessionStart, .userPromptSubmit, .preToolUse, .permissionRequest, .questionAsked:
+            return existing
+        }
+    }
+
+    private func resolvePendingOpenCodeInteraction(
+        sessionID: String,
+        resolution: PermissionResolution
+    ) {
+        guard let pendingInteraction = pendingOpenCodeInteractions.removeValue(forKey: sessionID) else {
+            return
+        }
+
+        let directive: OpenCodeHookDirective
+        let summary: String
+        let phase: SessionPhase
+
+        switch (pendingInteraction.kind, resolution) {
+        case let (.permission(payload), .allowOnce):
+            directive = .allow
+            summary = payload.toolName.map { "Permission approved for \($0)." } ?? "Permission approved."
+            phase = .running
+
+        case let (.permission(_), .deny(message, _)):
+            directive = .deny(reason: message ?? "Permission denied in Open Island.")
+            summary = message ?? "Permission denied in Open Island."
+            phase = .completed
+
+        case (.question, .allowOnce):
+            directive = .allow
+            summary = "OpenCode's question was answered."
+            phase = .running
+
+        case let (.question(_), .deny(message, _)):
+            directive = .deny(reason: message ?? "Declined to answer.")
+            summary = message ?? "Declined to answer."
+            phase = .completed
+        }
+
+        emit(
+            phase == .completed
+                ? .sessionCompleted(
+                    SessionCompleted(
+                        sessionID: sessionID,
+                        summary: summary,
+                        timestamp: .now
+                    )
+                )
+                : .activityUpdated(
+                    SessionActivityUpdated(
+                        sessionID: sessionID,
+                        summary: summary,
+                        phase: phase,
+                        timestamp: .now
+                    )
+                )
+        )
+
+        send(.response(.openCodeHookDirective(directive)), to: pendingInteraction.clientID)
+    }
+
+    private func resolvePendingOpenCodeQuestion(
+        sessionID: String,
+        response: QuestionPromptResponse
+    ) {
+        guard let pendingInteraction = pendingOpenCodeInteractions.removeValue(forKey: sessionID) else {
+            return
+        }
+
+        let answerText = response.rawAnswer ?? response.displaySummary
+        let summary = answerText.isEmpty
+            ? "Answered OpenCode's question."
+            : "Answered: \(answerText)"
+
+        emit(
+            .activityUpdated(
+                SessionActivityUpdated(
+                    sessionID: sessionID,
+                    summary: summary,
+                    phase: .running,
+                    timestamp: .now
+                )
+            )
+        )
+
+        send(
+            .response(.openCodeHookDirective(.answer(text: answerText))),
+            to: pendingInteraction.clientID
+        )
+    }
 
     private func clearStaleClaudeInteractionIfNeeded(for sessionID: String) {
         guard pendingClaudeInteractions.removeValue(forKey: sessionID) != nil else {
@@ -1429,6 +1852,24 @@ public final class BridgeServer: @unchecked Sendable {
                     ActionableStateResolved(
                         sessionID: sessionID,
                         summary: "Hook process disconnected.",
+                        timestamp: .now
+                    )
+                )
+            )
+        }
+
+        let pendingOpenCodeSessionIDs = pendingOpenCodeInteractions.compactMap { entry -> String? in
+            let (sessionID, pendingInteraction) = entry
+            return pendingInteraction.clientID == clientID ? sessionID : nil
+        }
+
+        for sessionID in pendingOpenCodeSessionIDs {
+            pendingOpenCodeInteractions.removeValue(forKey: sessionID)
+            emit(
+                .actionableStateResolved(
+                    ActionableStateResolved(
+                        sessionID: sessionID,
+                        summary: "Plugin process disconnected.",
                         timestamp: .now
                     )
                 )
