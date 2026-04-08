@@ -1875,4 +1875,25 @@ extension MarkdownUI.Theme {
             configuration.label
                 .markdownMargin(top: 2, bottom: 2)
         }
+        .table { configuration in
+            configuration.label
+                .fixedSize(horizontal: false, vertical: true)
+                .markdownTableBorderStyle(.init(.allBorders, color: .white.opacity(0.15), strokeStyle: .init(lineWidth: 1)))
+                .markdownTableBackgroundStyle(
+                    .alternatingRows(Color.white.opacity(0.04), Color.white.opacity(0.08))
+                )
+                .markdownMargin(top: 4, bottom: 8)
+        }
+        .tableCell { configuration in
+            configuration.label
+                .markdownTextStyle {
+                    if configuration.row == 0 {
+                        FontWeight(.semibold)
+                    }
+                }
+                .fixedSize(horizontal: false, vertical: true)
+                .padding(.vertical, 6)
+                .padding(.horizontal, 12)
+                .relativeLineSpacing(.em(0.25))
+        }
 }
