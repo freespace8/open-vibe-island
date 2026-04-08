@@ -497,6 +497,10 @@ public final class BridgeServer: @unchecked Sendable {
             return
         }
 
+        // On every event from the parent session, opportunistically clean up
+        // subagents whose SubagentStop was never received.
+        cleanUpStaleSubagents(forSession: payload.sessionID)
+
         switch payload.hookEventName {
         case .sessionStart:
             clearStaleClaudeInteractionIfNeeded(for: payload.sessionID)
@@ -742,6 +746,9 @@ public final class BridgeServer: @unchecked Sendable {
             synchronizeClaudeJumpTarget(for: payload)
             synchronizeClaudeMetadata(for: payload)
 
+            // Turn is complete — all subagents from this turn must be finished.
+            clearAllActiveSubagents(fromSession: payload.sessionID)
+
             emit(
                 .sessionCompleted(
                     SessionCompleted(
@@ -759,6 +766,9 @@ public final class BridgeServer: @unchecked Sendable {
             ensureClaudeSessionExists(for: payload)
             synchronizeClaudeJumpTarget(for: payload)
             synchronizeClaudeMetadata(for: payload)
+
+            // Turn failed — all subagents from this turn must be finished.
+            clearAllActiveSubagents(fromSession: payload.sessionID)
 
             emit(
                 .sessionCompleted(
@@ -852,6 +862,9 @@ public final class BridgeServer: @unchecked Sendable {
             ensureClaudeSessionExists(for: payload)
             synchronizeClaudeJumpTarget(for: payload)
             synchronizeClaudeMetadata(for: payload)
+
+            // Session is ending — clean up any lingering subagents.
+            clearAllActiveSubagents(fromSession: payload.sessionID)
 
             emit(
                 .sessionCompleted(
@@ -1541,6 +1554,59 @@ public final class BridgeServer: @unchecked Sendable {
         }
 
         metadata.activeSubagents.removeAll { $0.agentID == agentID }
+
+        emit(
+            .claudeSessionMetadataUpdated(
+                ClaudeSessionMetadataUpdated(
+                    sessionID: sessionID,
+                    claudeMetadata: metadata,
+                    timestamp: .now
+                )
+            )
+        )
+    }
+
+    /// Removes subagents that have been inactive for too long.
+    /// Called on each hook event from the parent session as a fallback
+    /// in case `SubagentStop` was never received (e.g. hook connection dropped).
+    private static let subagentStaleTimeout: TimeInterval = 3 * 60  // 3 minutes
+
+    private func cleanUpStaleSubagents(forSession sessionID: String) {
+        guard var metadata = localState.session(id: sessionID)?.claudeMetadata,
+              !metadata.activeSubagents.isEmpty else {
+            return
+        }
+
+        let now = Date.now
+        let before = metadata.activeSubagents.count
+        metadata.activeSubagents.removeAll { sub in
+            guard let started = sub.startedAt else { return false }
+            return now.timeIntervalSince(started) > Self.subagentStaleTimeout
+        }
+
+        guard metadata.activeSubagents.count != before else { return }
+
+        emit(
+            .claudeSessionMetadataUpdated(
+                ClaudeSessionMetadataUpdated(
+                    sessionID: sessionID,
+                    claudeMetadata: metadata,
+                    timestamp: .now
+                )
+            )
+        )
+    }
+
+    /// Clears all active subagents from the session.
+    /// Called when the session's turn ends (`stop`, `stopFailure`, `sessionEnd`)
+    /// to ensure no stale subagent indicators linger.
+    private func clearAllActiveSubagents(fromSession sessionID: String) {
+        guard var metadata = localState.session(id: sessionID)?.claudeMetadata,
+              !metadata.activeSubagents.isEmpty else {
+            return
+        }
+
+        metadata.activeSubagents.removeAll()
 
         emit(
             .claudeSessionMetadataUpdated(
