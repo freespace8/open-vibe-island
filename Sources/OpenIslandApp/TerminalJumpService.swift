@@ -8,6 +8,9 @@ struct TerminalJumpService {
     typealias OpenAction = @Sendable ([String]) throws -> Void
     typealias AppleScriptRunner = @Sendable (String) throws -> String
     typealias ProcessRunner = @Sendable (String, [String]) -> Bool
+    typealias WarpFocusedPaneReader = @Sendable () -> String?
+    typealias WarpTabCountReader = @Sendable () -> Int
+    typealias AccessibilityTrustChecker = @Sendable () -> Bool
 
     private struct TerminalAppDescriptor {
         let displayName: String
@@ -152,6 +155,10 @@ struct TerminalJumpService {
     private let openAction: OpenAction
     private let appleScriptRunner: AppleScriptRunner
     private let processRunner: ProcessRunner
+    private let warpFocusedPaneReader: WarpFocusedPaneReader
+    private let warpTabCountReader: WarpTabCountReader
+    private let warpKeystroker: KeystrokeInjector
+    private let accessibilityTrustChecker: AccessibilityTrustChecker
 
     init(
         applicationResolver: @escaping ApplicationResolver = { bundleIdentifier in
@@ -162,13 +169,21 @@ struct TerminalJumpService {
         },
         openAction: @escaping OpenAction = Self.defaultOpenAction(arguments:),
         appleScriptRunner: @escaping AppleScriptRunner = Self.defaultAppleScriptRunner(script:),
-        processRunner: @escaping ProcessRunner = Self.defaultProcessRunner(executable:arguments:)
+        processRunner: @escaping ProcessRunner = Self.defaultProcessRunner(executable:arguments:),
+        warpFocusedPaneReader: @escaping WarpFocusedPaneReader = { WarpSQLiteReader().currentFocusedPaneUUID() },
+        warpTabCountReader: @escaping WarpTabCountReader = { WarpSQLiteReader().tabCountInActiveWindow() },
+        warpKeystroker: KeystrokeInjector = DefaultKeystrokeInjector(),
+        accessibilityTrustChecker: @escaping AccessibilityTrustChecker = { DefaultAccessibilityPermissionChecker().isTrusted() }
     ) {
         self.applicationResolver = applicationResolver
         self.appRunningChecker = appRunningChecker
         self.openAction = openAction
         self.appleScriptRunner = appleScriptRunner
         self.processRunner = processRunner
+        self.warpFocusedPaneReader = warpFocusedPaneReader
+        self.warpTabCountReader = warpTabCountReader
+        self.warpKeystroker = warpKeystroker
+        self.accessibilityTrustChecker = accessibilityTrustChecker
     }
 
     func jump(to target: JumpTarget) throws -> String {
@@ -253,6 +268,8 @@ struct TerminalJumpService {
                 if try jumpToTerminalTab(target) {
                     return "Focused the matching Terminal tab."
                 }
+            case "dev.warp.Warp-Stable":
+                return try jumpToWarpPane(target)
             case "fun.tw93.kaku", "com.github.wez.wezterm":
                 if let cliPath = weztermFamilyCLIPath(for: descriptor.bundleIdentifier),
                    jumpToWeztermFamilyTerminal(target, cliPath: cliPath, bundleIdentifier: descriptor.bundleIdentifier) {
@@ -996,6 +1013,47 @@ struct TerminalJumpService {
         } catch {
             return false
         }
+    }
+
+    private func jumpToWarpPane(_ target: JumpTarget) throws -> String {
+        // 1. Always activate Warp first — this is the baseline behavior.
+        try openAction(["-b", "dev.warp.Warp-Stable"])
+
+        // 2. If we don't have a mapped pane UUID, we're done.
+        guard let targetPaneUUID = target.warpPaneUUID else {
+            return "Activated Warp. No precise pane mapping available."
+        }
+
+        // 3. Quick check: are we already on the target pane?
+        if warpFocusedPaneReader() == targetPaneUUID {
+            return "Focused the matching Warp tab."
+        }
+
+        // 4. We need to cycle. CGEventPost requires Accessibility permission;
+        //    if it's missing, keystrokes silently get dropped and the loop
+        //    is useless. Tell the user instead of pretending to try.
+        guard accessibilityTrustChecker() else {
+            return "Activated Warp. Grant Accessibility permission to enable precision jump."
+        }
+
+        // 5. Cycle with a cap. The cap is `tabCount + 2` — we only need at
+        //    most tabCount-1 cycles to reach any tab, but +2 is safety margin
+        //    for counting quirks and the rare case where active_tab_index is
+        //    briefly stale between read and next keystroke.
+        let tabCount = max(1, warpTabCountReader())
+        let maxAttempts = tabCount + 2
+
+        for _ in 0..<maxAttempts {
+            warpKeystroker.sendCmdShiftRightBracket()
+            // Small delay to let Warp update its SQLite state after tab switch.
+            // Empirically 50ms is stable; can be tuned down if benchmarking allows.
+            Thread.sleep(forTimeInterval: 0.05)
+            if warpFocusedPaneReader() == targetPaneUUID {
+                return "Focused the matching Warp tab."
+            }
+        }
+
+        return "Activated Warp but could not confirm precision focus."
     }
 
     private func resolveTerminalApp(preferredName: String) -> TerminalAppDescriptor? {

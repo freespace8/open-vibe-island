@@ -174,6 +174,170 @@ final class TerminalJumpServiceTests: XCTestCase {
         XCTAssertTrue(openedArguments.values.isEmpty)
     }
 
+    func testWarpJumpReturnsImmediatelyWhenAlreadyOnTargetPane() throws {
+        let openedArguments = OpenedArgumentsBox()
+        let keystroker = KeystrokeInjectorSpy()
+        let targetUUID = "D1A5DF3027E44FC080FE2656FAF2BA2E"
+
+        let service = TerminalJumpService(
+            applicationResolver: { id in
+                id == "dev.warp.Warp-Stable" ? URL(fileURLWithPath: "/Applications/Warp.app") : nil
+            },
+            appRunningChecker: { id in id == "dev.warp.Warp-Stable" },
+            openAction: { arguments in openedArguments.values.append(arguments) },
+            appleScriptRunner: { _ in "" },
+            warpFocusedPaneReader: { targetUUID },  // already at target
+            warpTabCountReader: { 3 },
+            warpKeystroker: keystroker,
+            accessibilityTrustChecker: { true }
+        )
+
+        let result = try service.jump(
+            to: JumpTarget(
+                terminalApp: "Warp",
+                workspaceName: "demo",
+                paneTitle: "Claude demo",
+                workingDirectory: "/Users/u/demo",
+                warpPaneUUID: targetUUID
+            )
+        )
+
+        XCTAssertEqual(result, "Focused the matching Warp tab.")
+        XCTAssertEqual(keystroker.callCount, 0)
+        XCTAssertEqual(openedArguments.values, [["-b", "dev.warp.Warp-Stable"]])
+    }
+
+    func testWarpJumpCyclesThroughTabsUntilTargetIsFocused() throws {
+        let openedArguments = OpenedArgumentsBox()
+        let keystroker = KeystrokeInjectorSpy()
+        let targetUUID = "BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB"
+
+        // Simulate starting on some other tab, then after 2 keystrokes landing on target.
+        let readSequence = ReadSequenceBox(values: [
+            "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA", // initial
+            "CCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCC", // after 1st keystroke
+            targetUUID,                         // after 2nd keystroke — match!
+        ])
+
+        let service = TerminalJumpService(
+            applicationResolver: { id in
+                id == "dev.warp.Warp-Stable" ? URL(fileURLWithPath: "/Applications/Warp.app") : nil
+            },
+            appRunningChecker: { id in id == "dev.warp.Warp-Stable" },
+            openAction: { arguments in openedArguments.values.append(arguments) },
+            appleScriptRunner: { _ in "" },
+            warpFocusedPaneReader: { readSequence.next() },
+            warpTabCountReader: { 4 },
+            warpKeystroker: keystroker,
+            accessibilityTrustChecker: { true }
+        )
+
+        let result = try service.jump(
+            to: JumpTarget(
+                terminalApp: "Warp",
+                workspaceName: "demo",
+                paneTitle: "Claude demo",
+                workingDirectory: "/Users/u/demo",
+                warpPaneUUID: targetUUID
+            )
+        )
+
+        XCTAssertEqual(result, "Focused the matching Warp tab.")
+        XCTAssertEqual(keystroker.callCount, 2)
+        XCTAssertEqual(openedArguments.values, [["-b", "dev.warp.Warp-Stable"]])
+    }
+
+    func testWarpJumpCapsOutAfterTabCountPlusTwoAndReturnsBestEffortMessage() throws {
+        let keystroker = KeystrokeInjectorSpy()
+        let service = TerminalJumpService(
+            applicationResolver: { id in
+                id == "dev.warp.Warp-Stable" ? URL(fileURLWithPath: "/Applications/Warp.app") : nil
+            },
+            appRunningChecker: { id in id == "dev.warp.Warp-Stable" },
+            openAction: { _ in },
+            appleScriptRunner: { _ in "" },
+            warpFocusedPaneReader: { "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA" },  // never matches
+            warpTabCountReader: { 3 },
+            warpKeystroker: keystroker,
+            accessibilityTrustChecker: { true }
+        )
+
+        let result = try service.jump(
+            to: JumpTarget(
+                terminalApp: "Warp",
+                workspaceName: "demo",
+                paneTitle: "Claude demo",
+                workingDirectory: "/Users/u/demo",
+                warpPaneUUID: "BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB"
+            )
+        )
+
+        XCTAssertEqual(result, "Activated Warp but could not confirm precision focus.")
+        XCTAssertEqual(keystroker.callCount, 5)  // tabCount (3) + 2
+    }
+
+    func testWarpJumpWithNilWarpPaneUUIDFallsBackToAppActivation() throws {
+        let keystroker = KeystrokeInjectorSpy()
+        let openedArguments = OpenedArgumentsBox()
+        let service = TerminalJumpService(
+            applicationResolver: { id in
+                id == "dev.warp.Warp-Stable" ? URL(fileURLWithPath: "/Applications/Warp.app") : nil
+            },
+            appRunningChecker: { id in id == "dev.warp.Warp-Stable" },
+            openAction: { arguments in openedArguments.values.append(arguments) },
+            appleScriptRunner: { _ in "" },
+            warpFocusedPaneReader: { "SHOULD-NOT-BE-READ" },
+            warpTabCountReader: { 3 },
+            warpKeystroker: keystroker,
+            accessibilityTrustChecker: { true }
+        )
+
+        let result = try service.jump(
+            to: JumpTarget(
+                terminalApp: "Warp",
+                workspaceName: "demo",
+                paneTitle: "Claude demo",
+                workingDirectory: "/Users/u/demo",
+                warpPaneUUID: nil
+            )
+        )
+
+        XCTAssertEqual(result, "Activated Warp. No precise pane mapping available.")
+        XCTAssertEqual(keystroker.callCount, 0)
+        XCTAssertEqual(openedArguments.values, [["-b", "dev.warp.Warp-Stable"]])
+    }
+
+    func testWarpJumpWithoutAccessibilityPermissionFallsBackToAppActivation() throws {
+        let keystroker = KeystrokeInjectorSpy()
+        let openedArguments = OpenedArgumentsBox()
+        let service = TerminalJumpService(
+            applicationResolver: { id in
+                id == "dev.warp.Warp-Stable" ? URL(fileURLWithPath: "/Applications/Warp.app") : nil
+            },
+            appRunningChecker: { id in id == "dev.warp.Warp-Stable" },
+            openAction: { arguments in openedArguments.values.append(arguments) },
+            appleScriptRunner: { _ in "" },
+            warpFocusedPaneReader: { "SOMETHING-ELSE" },
+            warpTabCountReader: { 3 },
+            warpKeystroker: keystroker,
+            accessibilityTrustChecker: { false }   // <-- permission denied
+        )
+
+        let result = try service.jump(
+            to: JumpTarget(
+                terminalApp: "Warp",
+                workspaceName: "demo",
+                paneTitle: "Claude demo",
+                workingDirectory: "/Users/u/demo",
+                warpPaneUUID: "BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB"
+            )
+        )
+
+        XCTAssertEqual(result, "Activated Warp. Grant Accessibility permission to enable precision jump.")
+        XCTAssertEqual(keystroker.callCount, 0)
+        XCTAssertEqual(openedArguments.values, [["-b", "dev.warp.Warp-Stable"]])
+    }
+
     func testUnknownTerminalAppFallsBackToFinderInsteadOfFirstInstalledTerminal() throws {
         let openedArguments = OpenedArgumentsBox()
         // Pretend iTerm is installed. Without the "unknown" guard in
@@ -205,6 +369,15 @@ final class TerminalJumpServiceTests: XCTestCase {
             result.contains("Finder"),
             "Expected Finder fallback, got: \(result)"
         )
+    }
+}
+
+final class ReadSequenceBox: @unchecked Sendable {
+    private var values: [String?]
+    init(values: [String?]) { self.values = values }
+    func next() -> String? {
+        guard !values.isEmpty else { return nil }
+        return values.removeFirst()
     }
 }
 
