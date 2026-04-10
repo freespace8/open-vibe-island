@@ -81,6 +81,7 @@
 /* Settings - About */
 "settings.about.version" = "Version %@";
 "settings.about.checkForUpdates" = "Check for Updates…";
+"settings.about.quitApp" = "Quit Open Island";
 
 /* Settings - Update */
 "settings.update.available" = "v%@ Available — Update";

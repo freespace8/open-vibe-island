@@ -1068,4 +1068,8 @@ final class AppModel {
         }
     }
 
+    func quitApplication() {
+        NSApplication.shared.terminate(nil)
+    }
+
 }
