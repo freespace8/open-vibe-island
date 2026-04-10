@@ -239,6 +239,40 @@ final class TerminalJumpServiceTests: XCTestCase {
         XCTAssertEqual(openedArguments.values, [["-b", "cn.trae.app"]])
     }
 
+    func testTraeCNJumpPrefersCNBundleWhenBothTraeVariantsExist() throws {
+        let openedArguments = OpenedArgumentsBox()
+        let service = TerminalJumpService(
+            applicationResolver: { bundleIdentifier in
+                switch bundleIdentifier {
+                case "com.trae.app":
+                    return URL(fileURLWithPath: "/Applications/Trae.app")
+                case "cn.trae.app":
+                    return URL(fileURLWithPath: "/Applications/Trae CN.app")
+                default:
+                    return nil
+                }
+            },
+            appRunningChecker: { bundleIdentifier in
+                bundleIdentifier == "com.trae.app"
+            },
+            openAction: { arguments in
+                openedArguments.values.append(arguments)
+            },
+            appleScriptRunner: { _ in "" }
+        )
+
+        let result = try service.jump(
+            to: JumpTarget(
+                terminalApp: "Trae CN",
+                workspaceName: "open-vibe-island",
+                paneTitle: "Trae abc123"
+            )
+        )
+
+        XCTAssertEqual(result, "Activated Trae. Exact pane targeting is still best-effort.")
+        XCTAssertEqual(openedArguments.values, [["-b", "cn.trae.app"]])
+    }
+
     func testTraeCNJumpFallsBackToWorkspaceViaTraeCLI() throws {
         let openedArguments = OpenedArgumentsBox()
         let processInvocations = ProcessInvocationBox()
