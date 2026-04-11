@@ -106,7 +106,7 @@ struct OpenIslandApp: App {
         Window("Open Island Settings", id: "settings") {
             SettingsWindowContent(model: appDelegate.model)
         }
-        .windowResizability(.contentSize)
+        .windowResizability(.contentMinSize)
         .commands {
             CommandGroup(replacing: .appSettings) {
                 Button("Settings…") {
