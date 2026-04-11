@@ -60,7 +60,7 @@
 "settings.appearance.status.approval" = "Approval";
 "settings.appearance.status.answer" = "Answer";
 "settings.appearance.status.completed" = "Completed";
-"settings.appearance.communityNote" = "Most of the content here comes from community contributions.\nWe welcome you to submit your own vibe anytime.";
+"settings.appearance.communityNote" = "Much of this was built by the community.\nGot your own vibe? We'd love a PR.";
 
 /* Settings - Display */
 "settings.display.monitor" = "Monitor";
