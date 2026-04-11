@@ -88,7 +88,7 @@ Think of it as an open-source [Vibe Island](https://vibeisland.app/) — **free,
 | **Windsurf** | Workspace | Activate workspace via `windsurf` CLI |
 | **Trae** | Workspace | Activate workspace via `trae` CLI |
 | **JetBrains IDEs** | Workspace | IDEA, WebStorm, PyCharm, GoLand, CLion, RubyMine, PhpStorm, Rider, RustRover |
-| **Warp** | Planned | Fallback detection only |
+| **Warp** | Full | Precision tab jump via SQLite pane lookup + AX menu click |
 
 ### Other Features
 
@@ -263,7 +263,7 @@ Developers who already live in the terminal and want a better way to work with c
 - **Terminal.app**, **Ghostty**, **cmux**, **Kaku**, **WezTerm**, **iTerm2**, and **Zellij** — Full jump-back support with session attachment matching (cmux via Unix socket API, Kaku/WezTerm/Zellij via CLI pane targeting, iTerm2 via AppleScript session/TTY probe)
 - **VS Code**, **VS Code Insiders**, **Cursor**, **Windsurf**, **Trae** — Workspace-level jump via respective CLI (`code -r`, `cursor -r`, etc.)
 - **JetBrains IDEs** (IntelliJ IDEA, WebStorm, PyCharm, GoLand, CLion, RubyMine, PhpStorm, Rider, RustRover) — Workspace-level jump via IDE CLI launcher
-- **Warp** — Fallback detection and basic process discovery
+- **Warp** — Precision tab jump via SQLite pane lookup, pid-based sibling-tab disambiguation, and AX menu click
 
 ### UI & Display
 
