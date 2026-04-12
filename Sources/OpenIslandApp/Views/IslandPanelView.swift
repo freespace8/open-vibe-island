@@ -1107,7 +1107,7 @@ private struct IslandSessionRow: View {
                                             .font(.system(size: 10, weight: .medium))
                                             .foregroundStyle(.white.opacity(0.4))
                                     } else if let started = sub.startedAt {
-                                        TimelineView(.periodic(from: .now, by: 5)) { timeline in
+                                        TimelineView(.periodic(from: .now, by: 1)) { timeline in
                                             Text(subagentElapsed(since: started, at: timeline.date))
                                                 .font(.system(size: 10, weight: .medium))
                                                 .foregroundStyle(.white.opacity(0.4))
