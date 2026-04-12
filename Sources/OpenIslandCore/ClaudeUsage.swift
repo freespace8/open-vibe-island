@@ -108,13 +108,6 @@ public enum ClaudeUsageLoader {
         }
     }
 
-    nonisolated(unsafe) private static let iso8601Formatter = ISO8601DateFormatter()
-    nonisolated(unsafe) private static let iso8601FormatterWithFraction: ISO8601DateFormatter = {
-        let f = ISO8601DateFormatter()
-        f.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-        return f
-    }()
-
     private static func date(from value: Any?) -> Date? {
         switch value {
         case let value as NSNumber:
@@ -123,10 +116,14 @@ public enum ClaudeUsageLoader {
             if let seconds = Double(value) {
                 return Date(timeIntervalSince1970: seconds)
             }
-            if let date = iso8601FormatterWithFraction.date(from: value) {
+            let formatterWithFractionalSeconds = ISO8601DateFormatter()
+            formatterWithFractionalSeconds.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+            if let date = formatterWithFractionalSeconds.date(from: value) {
                 return date
             }
-            if let date = iso8601Formatter.date(from: value) {
+            let formatter = ISO8601DateFormatter()
+            formatter.formatOptions = [.withInternetDateTime]
+            if let date = formatter.date(from: value) {
                 return date
             }
             return nil
