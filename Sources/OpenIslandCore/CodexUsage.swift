@@ -120,25 +120,40 @@ public enum CodexUsageLoader {
         return nil
     }
 
+    /// Read only the tail of the file and scan lines in reverse to find the
+    /// most recent `token_count` event without parsing the entire JSONL file.
     private static func loadLatestSnapshot(from fileURL: URL, modifiedAt: Date) -> CodexUsageSnapshot? {
-        guard let contents = try? String(contentsOf: fileURL, encoding: .utf8) else {
+        guard let fileHandle = try? FileHandle(forReadingFrom: fileURL) else {
+            return nil
+        }
+        defer { try? fileHandle.close() }
+
+        let fileSize = fileHandle.seekToEndOfFile()
+        guard fileSize > 0 else {
             return nil
         }
 
-        var latestSnapshot: CodexUsageSnapshot?
-        contents.enumerateLines { line, _ in
-            guard let snapshot = snapshot(
-                from: line,
-                filePath: fileURL.path,
-                fallbackTimestamp: modifiedAt
-            ) else {
-                return
-            }
+        // 64 KB is more than enough to contain at least one full token_count event.
+        let tailSize: UInt64 = min(fileSize, 65_536)
+        fileHandle.seek(toFileOffset: fileSize - tailSize)
 
-            latestSnapshot = snapshot
+        guard let tailData = try? fileHandle.readToEnd(),
+              let tailString = String(data: tailData, encoding: .utf8) else {
+            return nil
         }
 
-        return latestSnapshot
+        let lines = tailString.split(whereSeparator: \.isNewline)
+        for line in lines.reversed() {
+            if let snap = snapshot(
+                from: String(line),
+                filePath: fileURL.path,
+                fallbackTimestamp: modifiedAt
+            ) {
+                return snap
+            }
+        }
+
+        return nil
     }
 
     private static func snapshot(

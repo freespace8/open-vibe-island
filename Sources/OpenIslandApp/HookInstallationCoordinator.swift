@@ -926,7 +926,7 @@ final class HookInstallationCoordinator {
 
             while !Task.isCancelled {
                 self.refreshClaudeUsageState()
-                try? await Task.sleep(for: .seconds(5))
+                try? await Task.sleep(for: .seconds(60))
             }
         }
     }

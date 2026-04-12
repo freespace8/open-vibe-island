@@ -27,7 +27,7 @@ final class ProcessMonitoringCoordinator {
     var onPersistenceNeeded: (() -> Void)?
 
     @ObservationIgnored
-    let activeAgentProcessDiscovery = ActiveAgentProcessDiscovery()
+    let activeAgentProcessDiscovery = ActiveAgentProcessDiscovery(useSysctl: true)
 
     @ObservationIgnored
     private let terminalSessionAttachmentProbe = TerminalSessionAttachmentProbe()
@@ -37,6 +37,15 @@ final class ProcessMonitoringCoordinator {
 
     @ObservationIgnored
     private var sessionAttachmentMonitorTask: Task<Void, Never>?
+
+    @ObservationIgnored
+    private var fallbackDiscoveryTask: Task<Void, Never>?
+
+    /// Maps OS process IDs to the session IDs they serve.
+    /// Populated by each fallback discovery scan, consumed by the
+    /// lightweight `checkLiveness()` loop.
+    @ObservationIgnored
+    private var pidToSessionIDs: [Int32: Set<String>] = [:]
 
     private var state: SessionState {
         get { stateAccessor?() ?? SessionState() }
@@ -50,7 +59,33 @@ final class ProcessMonitoringCoordinator {
             return
         }
 
+        // Loop A: lightweight liveness check every 10s.
+        // Uses kill(pid, 0) on cached PIDs — single syscall per session,
+        // no fork, no string allocation.
         sessionAttachmentMonitorTask = Task { @MainActor [weak self] in
+            guard let self else {
+                return
+            }
+
+            while !Task.isCancelled {
+                self.checkLiveness()
+                try? await Task.sleep(for: .seconds(10))
+            }
+        }
+
+        // Loop B: full fallback discovery every 30s.
+        // Runs sysctl + lsof + terminal probe + jump resolver.
+        // Discovers wild processes, creates synthetic sessions,
+        // updates terminal attachments, and refreshes PID cache.
+        startFallbackDiscoveryIfNeeded()
+    }
+
+    private func startFallbackDiscoveryIfNeeded() {
+        guard fallbackDiscoveryTask == nil else {
+            return
+        }
+
+        fallbackDiscoveryTask = Task { @MainActor [weak self] in
             guard let self else {
                 return
             }
@@ -67,13 +102,18 @@ final class ProcessMonitoringCoordinator {
                     let j = resolver.resolveJumpTargets(for: liveSessions, activeProcesses: s)
                     return (s, g, t, j)
                 }.value
+
+                // Refresh the PID cache from this scan so the lightweight
+                // liveness loop can use kill(pid, 0) in between.
+                self.updatePIDCache(from: snapshots)
+
                 self.reconcileSessionAttachments(
                     activeProcesses: snapshots,
                     ghosttyAvailability: ghosttyAvail,
                     terminalAvailability: terminalAvail,
                     preResolvedJumpTargets: jumpTargets
                 )
-                try? await Task.sleep(for: .seconds(2))
+                try? await Task.sleep(for: .seconds(30))
             }
         }
     }
@@ -234,7 +274,83 @@ final class ProcessMonitoringCoordinator {
         }
     }
 
-    // MARK: - Process liveness
+    // MARK: - Lightweight liveness check
+
+    /// Checks whether known agent processes are still alive using `kill(pid, 0)`.
+    ///
+    /// This runs every 10s and is near-zero cost: one syscall per tracked PID,
+    /// no fork, no string allocation. If a process is gone (ESRCH), all sessions
+    /// associated with that PID are marked as dead.
+    private func checkLiveness() {
+        guard !pidToSessionIDs.isEmpty else { return }
+
+        var deadSessionIDs: Set<String> = []
+
+        for (pid, sessionIDs) in pidToSessionIDs {
+            // kill(pid, 0) sends no signal — it only checks if the process exists.
+            // Returns 0 if alive, -1 with errno == ESRCH if not found,
+            // or -1 with errno == EPERM if alive but no permission.
+            if kill(pid, 0) != 0 && errno == ESRCH {
+                deadSessionIDs.formUnion(sessionIDs)
+            }
+        }
+
+        guard !deadSessionIDs.isEmpty else { return }
+
+        // Remove dead entries from the cache.
+        for (pid, sessionIDs) in pidToSessionIDs {
+            let remaining = sessionIDs.subtracting(deadSessionIDs)
+            if remaining.isEmpty {
+                pidToSessionIDs.removeValue(forKey: pid)
+            } else {
+                pidToSessionIDs[pid] = remaining
+            }
+        }
+
+        // Mark dead sessions.
+        let aliveIDs = Set(state.sessions.filter(\.isTrackedLiveSession).map(\.id))
+            .subtracting(deadSessionIDs)
+        _ = state.markProcessLiveness(aliveSessionIDs: aliveIDs)
+        _ = state.removeInvisibleSessions()
+        onSessionsReconciled?()
+        onPersistenceNeeded?()
+    }
+
+    /// Refreshes the PID → session-ID mapping from the latest fallback scan.
+    ///
+    /// Called after each 30s sysctl discovery. The mapping is consumed by
+    /// `checkLiveness()` every 10s for lightweight `kill(pid, 0)` checks.
+    private func updatePIDCache(from snapshots: [ActiveProcessSnapshot]) {
+        var newCache: [Int32: Set<String>] = [:]
+        let sessions = state.sessions.filter(\.isTrackedLiveSession)
+
+        for snapshot in snapshots {
+            guard let pid = snapshot.processPID, pid > 0 else { continue }
+
+            // Find which tracked sessions this PID maps to using the
+            // same matching logic as sessionIDsWithAliveProcesses.
+            var matchedIDs: Set<String> = []
+
+            if let sid = snapshot.sessionID,
+               sessions.contains(where: { $0.id == sid }) {
+                matchedIDs.insert(sid)
+            }
+
+            if let transcript = snapshot.transcriptPath {
+                for session in sessions where session.claudeMetadata?.transcriptPath == transcript {
+                    matchedIDs.insert(session.id)
+                }
+            }
+
+            if !matchedIDs.isEmpty {
+                newCache[pid, default: []].formUnion(matchedIDs)
+            }
+        }
+
+        pidToSessionIDs = newCache
+    }
+
+    // MARK: - Process liveness (full scan)
 
     func sessionIDsWithAliveProcesses(
         activeProcesses: [ActiveProcessSnapshot]
