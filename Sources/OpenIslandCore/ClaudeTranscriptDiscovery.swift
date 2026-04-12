@@ -11,6 +11,8 @@ public final class ClaudeTranscriptDiscovery: @unchecked Sendable {
             .appendingPathComponent(".claude/projects", isDirectory: true)
     }
 
+    nonisolated(unsafe) private static let iso8601Formatter = ISO8601DateFormatter()
+
     private let rootURL: URL
     private let fileManager: FileManager
     private let maxAge: TimeInterval
@@ -97,7 +99,7 @@ public final class ClaudeTranscriptDiscovery: @unchecked Sendable {
             }
 
             if let timestampText = object["timestamp"] as? String,
-               let timestamp = ISO8601DateFormatter().date(from: timestampText) {
+               let timestamp = Self.iso8601Formatter.date(from: timestampText) {
                 updatedAt = timestamp
             }
 

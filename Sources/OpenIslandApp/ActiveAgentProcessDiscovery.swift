@@ -420,14 +420,13 @@ struct ActiveAgentProcessDiscovery {
         return nil
     }
 
-    private func firstUUID(in text: String) -> String? {
-        let pattern = #"[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}"#
-        guard let regex = try? NSRegularExpression(pattern: pattern) else {
-            return nil
-        }
+    private static let uuidRegex = try! NSRegularExpression(
+        pattern: #"[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}"#
+    )
 
+    private func firstUUID(in text: String) -> String? {
         let range = NSRange(text.startIndex..<text.endIndex, in: text)
-        guard let match = regex.firstMatch(in: text, options: [], range: range),
+        guard let match = Self.uuidRegex.firstMatch(in: text, options: [], range: range),
               let matchRange = Range(match.range, in: text) else {
             return nil
         }
