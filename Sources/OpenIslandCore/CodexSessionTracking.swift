@@ -1124,12 +1124,16 @@ private func codexRolloutJSONObject(for line: String) -> [String: Any]? {
     return dictionary
 }
 
+private nonisolated(unsafe) let codexRolloutISO8601Formatter: ISO8601DateFormatter = {
+    let f = ISO8601DateFormatter()
+    f.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+    return f
+}()
+
 private func codexRolloutParseTimestamp(_ string: String?) -> Date? {
     guard let string else {
         return nil
     }
 
-    let formatter = ISO8601DateFormatter()
-    formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-    return formatter.date(from: string)
+    return codexRolloutISO8601Formatter.date(from: string)
 }
