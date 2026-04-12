@@ -50,14 +50,16 @@ struct ActiveAgentProcessDiscoveryTests {
             sessionID: nil,
             workingDirectory: "/tmp/open-island",
             terminalTTY: "/dev/ttys002",
-            terminalApp: "Ghostty"
+            terminalApp: "Ghostty",
+            processPID: 102
         )))
         #expect(snapshots.contains(.init(
             tool: .codex,
             sessionID: "019d516f-71ee-7e40-bcff-502fedac0928",
             workingDirectory: "/tmp/open-island",
             terminalTTY: "/dev/ttys001",
-            terminalApp: "Ghostty"
+            terminalApp: "Ghostty",
+            processPID: 202
         )))
     }
 
@@ -90,7 +92,8 @@ struct ActiveAgentProcessDiscoveryTests {
                 sessionID: "9df061a9-6836-4ccb-b83b-aea3196eca43",
                 workingDirectory: "/tmp/open-island",
                 terminalTTY: "/dev/ttys002",
-                terminalApp: "Ghostty"
+                terminalApp: "Ghostty",
+                processPID: 102
             ),
         ])
     }

@@ -1,3 +1,4 @@
+import Darwin
 import Foundation
 import OpenIslandCore
 
@@ -18,6 +19,8 @@ struct ActiveAgentProcessDiscovery {
         var transcriptPath: String?
         var tmuxTarget: String?
         var tmuxSocketPath: String?
+        /// The OS process ID, used for lightweight `kill(pid, 0)` liveness checks.
+        var processPID: Int32?
 
         init(
             tool: AgentTool,
@@ -27,7 +30,8 @@ struct ActiveAgentProcessDiscovery {
             terminalApp: String? = nil,
             transcriptPath: String? = nil,
             tmuxTarget: String? = nil,
-            tmuxSocketPath: String? = nil
+            tmuxSocketPath: String? = nil,
+            processPID: Int32? = nil
         ) {
             self.tool = tool
             self.sessionID = sessionID
@@ -37,6 +41,7 @@ struct ActiveAgentProcessDiscovery {
             self.transcriptPath = transcriptPath
             self.tmuxTarget = tmuxTarget
             self.tmuxSocketPath = tmuxSocketPath
+            self.processPID = processPID
         }
     }
 
@@ -51,8 +56,21 @@ struct ActiveAgentProcessDiscovery {
 
     private let commandRunner: CommandRunner
 
+    /// When true, use sysctl kernel calls instead of forking /bin/ps.
+    /// Defaults to true in production; false when a custom commandRunner is injected (tests).
+    private let useSysctl: Bool
+
     init(commandRunner: @escaping CommandRunner = Self.commandOutput) {
         self.commandRunner = commandRunner
+        // If the caller provides a custom commandRunner (test injection),
+        // fall back to the ps-parsing path so existing mock tests pass.
+        self.useSysctl = false
+    }
+
+    /// Production initializer. Uses sysctl for zero-fork process enumeration.
+    init(useSysctl: Bool) {
+        self.commandRunner = Self.commandOutput
+        self.useSysctl = useSysctl
     }
 
     func discover() -> [ProcessSnapshot] {
@@ -72,7 +90,7 @@ struct ActiveAgentProcessDiscovery {
             }
 
             if isCodexProcess(command: process.command) {
-                guard let snapshot = codexSnapshot(for: process, processesByPID: processesByPID) else {
+                guard var snapshot = codexSnapshot(for: process, processesByPID: processesByPID) else {
                     continue
                 }
 
@@ -81,12 +99,13 @@ struct ActiveAgentProcessDiscovery {
                     continue
                 }
 
+                snapshot.processPID = Int32(process.pid)
                 snapshots.append(snapshot)
                 continue
             }
 
             if isClaudeProcess(command: process.command) {
-                guard let snapshot = claudeSnapshot(for: process, processesByPID: processesByPID) else {
+                guard var snapshot = claudeSnapshot(for: process, processesByPID: processesByPID) else {
                     continue
                 }
 
@@ -95,6 +114,7 @@ struct ActiveAgentProcessDiscovery {
                     continue
                 }
 
+                snapshot.processPID = Int32(process.pid)
                 snapshots.append(snapshot)
                 continue
             }
@@ -109,7 +129,8 @@ struct ActiveAgentProcessDiscovery {
                     tool: .openCode,
                     sessionID: nil,
                     workingDirectory: nil,
-                    terminalTTY: process.terminalTTY
+                    terminalTTY: process.terminalTTY,
+                    processPID: Int32(process.pid)
                 ))
             }
         }
@@ -118,6 +139,130 @@ struct ActiveAgentProcessDiscovery {
     }
 
     private func runningProcesses() -> [RunningProcess] {
+        useSysctl ? runningProcessesSysctl() : runningProcessesPS()
+    }
+
+    // MARK: - sysctl-based process enumeration (zero fork)
+
+    private func runningProcessesSysctl() -> [RunningProcess] {
+        var mib: [Int32] = [CTL_KERN, KERN_PROC, KERN_PROC_ALL, 0]
+        var size: Int = 0
+        guard sysctl(&mib, UInt32(mib.count), nil, &size, nil, 0) == 0, size > 0 else {
+            return []
+        }
+
+        let count = size / MemoryLayout<kinfo_proc>.stride
+        var procs = [kinfo_proc](repeating: kinfo_proc(), count: count)
+        guard sysctl(&mib, UInt32(mib.count), &procs, &size, nil, 0) == 0 else {
+            return []
+        }
+
+        let actualCount = size / MemoryLayout<kinfo_proc>.stride
+        return procs.prefix(actualCount).compactMap { info -> RunningProcess? in
+            let pid = info.kp_proc.p_pid
+            let ppid = info.kp_eproc.e_ppid
+            guard pid > 0 else { return nil }
+
+            // p_comm is a 16-char short name — use it for fast pre-filtering.
+            let shortName = withUnsafePointer(to: info.kp_proc.p_comm) { ptr in
+                ptr.withMemoryRebound(to: CChar.self, capacity: Int(MAXCOMLEN)) {
+                    String(cString: $0)
+                }
+            }
+
+            guard Self.isInterestingShortName(shortName) else { return nil }
+
+            // Full command line via KERN_PROCARGS2 (only for interesting processes).
+            let fullCommand = Self.fullCommandLine(for: pid) ?? shortName
+
+            // TTY from the kinfo_proc tdev field.
+            let tty = Self.ttyDevicePath(for: info)
+
+            return RunningProcess(
+                pid: String(pid),
+                parentPID: String(ppid),
+                terminalTTY: tty,
+                command: fullCommand
+            )
+        }
+    }
+
+    /// Quick filter using the 16-char short process name from kinfo_proc.p_comm.
+    /// Only processes that could be agents, terminals, or multiplexers pass.
+    private static func isInterestingShortName(_ name: String) -> Bool {
+        let lower = name.lowercased()
+        // Agent CLIs
+        if lower == "codex" || lower == "claude" || lower == "opencode" { return true }
+        // Node.js (Claude Code, Codex, OpenCode may run under node)
+        if lower == "node" { return true }
+        // Terminal emulators (needed for parent-chain terminal app resolution)
+        if lower == "ghostty" || lower == "terminal" || lower == "iterm2"
+            || lower == "warp" || lower == "kaku-gui" || lower == "wezterm-gui"
+            || lower == "cmux" || lower == "zellij" { return true }
+        // tmux (needed for tmux parent resolution)
+        if lower.hasPrefix("tmux") { return true }
+        // Shells (needed for parent-chain traversal from agent → shell → terminal)
+        if lower == "bash" || lower == "zsh" || lower == "fish" || lower == "sh"
+            || lower == "dash" || lower == "nu" { return true }
+        // Electron apps (Cursor, VS Code, Windsurf, Trae)
+        if lower.hasPrefix("electron") || lower.hasPrefix("code") { return true }
+        return false
+    }
+
+    /// Retrieve the full command line for a process via sysctl KERN_PROCARGS2.
+    private static func fullCommandLine(for pid: Int32) -> String? {
+        var mib: [Int32] = [CTL_KERN, KERN_PROCARGS2, pid]
+        var size: Int = 0
+        guard sysctl(&mib, UInt32(mib.count), nil, &size, nil, 0) == 0, size > 0 else {
+            return nil
+        }
+
+        var buffer = [UInt8](repeating: 0, count: size)
+        guard sysctl(&mib, UInt32(mib.count), &buffer, &size, nil, 0) == 0,
+              size > MemoryLayout<Int32>.size else {
+            return nil
+        }
+
+        // Layout: [argc: Int32] [exec_path\0] [padding \0s] [argv[0]\0 argv[1]\0 ...]
+        let argc: Int32 = buffer.withUnsafeBufferPointer {
+            $0.baseAddress!.withMemoryRebound(to: Int32.self, capacity: 1) { $0.pointee }
+        }
+
+        var offset = MemoryLayout<Int32>.size
+
+        // Skip exec_path (null-terminated string)
+        while offset < size && buffer[offset] != 0 { offset += 1 }
+        // Skip null padding
+        while offset < size && buffer[offset] == 0 { offset += 1 }
+
+        // Collect argv[0 ..< argc]
+        var args: [String] = []
+        var start = offset
+        for i in offset..<size {
+            if buffer[i] == 0 {
+                if i > start {
+                    args.append(String(bytes: buffer[start..<i], encoding: .utf8) ?? "")
+                }
+                start = i + 1
+                if args.count >= Int(argc) { break }
+            }
+        }
+
+        return args.isEmpty ? nil : args.joined(separator: " ")
+    }
+
+    /// Resolve the TTY device path from kinfo_proc.kp_eproc.e_tdev.
+    private static func ttyDevicePath(for info: kinfo_proc) -> String? {
+        let tdev = info.kp_eproc.e_tdev
+        // -1 (or NODEV) means no controlling terminal.
+        guard tdev != UInt32(bitPattern: -1), tdev != 0 else { return nil }
+        guard let name = devname(tdev, S_IFCHR) else { return nil }
+        return "/dev/\(String(cString: name))"
+    }
+
+    // MARK: - ps-based process enumeration (fork fallback / test path)
+
+    private func runningProcessesPS() -> [RunningProcess] {
         guard let output = commandRunner("/bin/ps", ["-Ao", "pid=,ppid=,tty=,command="]) else {
             return []
         }
