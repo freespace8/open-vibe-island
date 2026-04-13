@@ -1,6 +1,10 @@
 import AppKit
 import SwiftUI
 
+enum OpenIslandWindowIdentifier {
+    static let overlayPanel = NSUserInterfaceItemIdentifier("OpenIslandOverlayPanel")
+}
+
 @MainActor
 final class OpenIslandAppDelegate: NSObject, NSApplicationDelegate {
     let model = AppModel()
@@ -83,8 +87,16 @@ final class OpenIslandAppDelegate: NSObject, NSApplicationDelegate {
         false
     }
 
+    static func shouldHideOnLaunch(_ window: NSWindow) -> Bool {
+        guard !window.className.contains("MenuBarExtra") else {
+            return false
+        }
+
+        return window.identifier != OpenIslandWindowIdentifier.overlayPanel
+    }
+
     private static func hideAllAppWindows() {
-        for window in NSApp.windows where !window.className.contains("MenuBarExtra") {
+        for window in NSApp.windows where shouldHideOnLaunch(window) {
             window.orderOut(nil)
         }
     }
