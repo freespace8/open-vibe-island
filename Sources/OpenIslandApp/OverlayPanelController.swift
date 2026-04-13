@@ -642,33 +642,46 @@ final class OverlayPanelController {
             return Self.questionCardBaseHeight
         }
 
+        // Container vertical padding: 12 * 2 = 24pt
+        // actionableBodyHeight subtracts 44, so we include that offset here
+        let containerChrome: CGFloat = 24 + 44
+
         let questions = prompt.questions
         guard !questions.isEmpty else {
-            // Simple option-only prompt. Estimate extra height if title is long
-            // (wraps to multiple lines with 13pt semibold Chinese text at ~480pt width).
+            // Simple prompt: title + vertical option rows (new checklist layout)
             let titleLength = prompt.title.count
             let extraTitleLines = max(0, (titleLength - 20) / 20)
-            let titleOverflow = CGFloat(extraTitleLines) * 18
+            let titleHeight: CGFloat = 18 + CGFloat(extraTitleLines) * 18
 
-            let hasOptions = !prompt.options.isEmpty
-            if hasOptions {
-                return Self.questionCardBaseHeight + titleOverflow
+            let optionCount = prompt.options.count
+            if optionCount > 0 {
+                // Each option row: ~34pt (7pt vertical padding * 2 + label text ~18pt + spacing 3pt)
+                let optionRowHeight: CGFloat = 34
+                let optionsHeight = CGFloat(optionCount) * optionRowHeight
+                // Cap the estimated height to match ScrollView maxHeight (260)
+                let cappedOptionsHeight = min(optionsHeight, 260)
+                return containerChrome + titleHeight + 10 + cappedOptionsHeight
             }
 
-            // No options: just the title label inside a padded container.
-            // container vertical padding (24) + title (~18) + row bottom padding (14)
-            // + actionableBodyHeight offset compensation (44)
-            let minimalHeight: CGFloat = 100
-            return minimalHeight + titleOverflow
+            // No options: just title + free-text input row (~40pt)
+            return containerChrome + titleHeight + 10 + 40
         }
 
-        // Structured prompt: title + per-question blocks + submit button
-        // Title line: ~24pt, container padding: 24pt
-        let titleHeight: CGFloat = 48
-        let questionsHeight = CGFloat(questions.count) * Self.questionItemHeight
-        let estimated = titleHeight + questionsHeight + Self.questionSubmitHeight
-        // Cap at a reasonable maximum so the panel doesn't grow unbounded
-        return min(estimated, 500)
+        // Structured prompt: title + per-question sections + submit button
+        // Each question section: header (16) + question text (20)
+        //   + option rows (each ~34pt) + inter-question spacing (16)
+        let titleHeight: CGFloat = 18
+        var questionsHeight: CGFloat = 0
+        for question in questions {
+            let headerHeight: CGFloat = question.header.isEmpty ? 0 : 18
+            let questionTextHeight: CGFloat = 20
+            let optionRows = CGFloat(question.options.count) * 34
+            questionsHeight += headerHeight + 6 + questionTextHeight + 6 + optionRows + 16
+        }
+        let submitHeight: CGFloat = 44
+        let estimated = containerChrome + titleHeight + 10 + questionsHeight + submitHeight
+        // Cap at ScrollView maxHeight (380) + chrome
+        return min(estimated, 380 + containerChrome + titleHeight + 10 + submitHeight)
     }
 
     private func completionCardHeight(for model: AppModel) -> CGFloat {

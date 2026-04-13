@@ -1501,9 +1501,10 @@ private struct StructuredQuestionPromptView: View {
     let onAnswer: (QuestionPromptResponse) -> Void
 
     @State private var selections: [String: Set<String>] = [:]
+    @State private var freeTextInput: String = ""
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
+        VStack(alignment: .leading, spacing: 10) {
             if showsPromptTitle {
                 Text(promptTitle)
                     .font(.system(size: 13, weight: .semibold))
@@ -1512,50 +1513,9 @@ private struct StructuredQuestionPromptView: View {
             }
 
             if structuredQuestions.isEmpty {
-                HStack(spacing: 10) {
-                    ForEach(prompt?.options.prefix(3) ?? [], id: \.self) { option in
-                        Button(option) {
-                            onAnswer(QuestionPromptResponse(answer: option))
-                        }
-                        .buttonStyle(IslandWideButtonStyle(kind: .secondary))
-                    }
-                }
+                simpleOptionsBody
             } else {
-                ScrollView(.vertical, showsIndicators: false) {
-                    VStack(alignment: .leading, spacing: 12) {
-                        ForEach(structuredQuestions, id: \.question) { question in
-                            VStack(alignment: .leading, spacing: 8) {
-                                Text(question.header)
-                                    .font(.system(size: 10.5, weight: .bold))
-                                    .foregroundStyle(.white.opacity(0.5))
-
-                                Text(question.question)
-                                    .font(.system(size: 12.5, weight: .medium))
-                                    .foregroundStyle(.white.opacity(0.88))
-                                    .fixedSize(horizontal: false, vertical: true)
-
-                                HStack(spacing: 8) {
-                                    ForEach(question.options.prefix(4), id: \.label) { option in
-                                        Button(option.label) {
-                                            toggle(option: option.label, for: question)
-                                        }
-                                        .buttonStyle(
-                                            IslandWideButtonStyle(
-                                                kind: selectedLabels(for: question).contains(option.label) ? .primary : .secondary
-                                            )
-                                        )
-                                    }
-                                }
-                            }
-                        }
-
-                        Button(lang.t("question.submit")) {
-                            onAnswer(QuestionPromptResponse(answers: answerMap))
-                        }
-                        .buttonStyle(IslandWideButtonStyle(kind: .primary))
-                        .disabled(!hasCompleteSelection)
-                    }
-                }
+                structuredQuestionsBody
             }
         }
         .padding(.horizontal, 14)
@@ -1570,6 +1530,194 @@ private struct StructuredQuestionPromptView: View {
                 .strokeBorder(.white.opacity(0.06))
         )
     }
+
+    // MARK: - Simple options (no structured questions)
+
+    @ViewBuilder
+    private var simpleOptionsBody: some View {
+        let options = prompt?.options ?? []
+        if options.isEmpty {
+            // No options at all — show free-text input
+            freeTextInputRow
+        } else {
+            // Vertical option list
+            ScrollView(.vertical, showsIndicators: false) {
+                VStack(alignment: .leading, spacing: 4) {
+                    ForEach(options, id: \.self) { option in
+                        optionRow(
+                            label: option,
+                            description: nil,
+                            isSelected: false,
+                            action: { onAnswer(QuestionPromptResponse(answer: option)) }
+                        )
+                    }
+                }
+            }
+            .frame(maxHeight: 260)
+        }
+    }
+
+    // MARK: - Structured questions
+
+    private var structuredQuestionsBody: some View {
+        ScrollView(.vertical, showsIndicators: false) {
+            VStack(alignment: .leading, spacing: 16) {
+                ForEach(structuredQuestions, id: \.question) { question in
+                    structuredQuestionSection(question)
+                }
+
+                Button {
+                    onAnswer(QuestionPromptResponse(answers: answerMap))
+                } label: {
+                    Text(lang.t("question.submit"))
+                        .font(.system(size: 11.5, weight: .semibold))
+                        .foregroundStyle(.white)
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 11)
+                        .background(
+                            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                                .fill(hasCompleteSelection
+                                    ? Color(red: 0.26, green: 0.45, blue: 0.86)
+                                    : Color.white.opacity(0.08))
+                        )
+                }
+                .buttonStyle(.plain)
+                .disabled(!hasCompleteSelection)
+            }
+        }
+        .frame(maxHeight: 380)
+    }
+
+    private func structuredQuestionSection(_ question: QuestionPromptItem) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            if !question.header.isEmpty {
+                Text(question.header.uppercased())
+                    .font(.system(size: 10, weight: .bold, design: .monospaced))
+                    .foregroundStyle(.white.opacity(0.4))
+                    .tracking(0.5)
+            }
+
+            Text(question.question)
+                .font(.system(size: 12.5, weight: .medium))
+                .foregroundStyle(.white.opacity(0.88))
+                .fixedSize(horizontal: false, vertical: true)
+
+            VStack(alignment: .leading, spacing: 3) {
+                ForEach(question.options, id: \.label) { option in
+                    let isSelected = selectedLabels(for: question).contains(option.label)
+                    optionRow(
+                        label: option.label,
+                        description: option.description.isEmpty ? nil : option.description,
+                        isSelected: isSelected,
+                        action: { toggle(option: option.label, for: question) }
+                    )
+                }
+            }
+        }
+    }
+
+    // MARK: - Option row (checkbox-style)
+
+    private func optionRow(
+        label: String,
+        description: String?,
+        isSelected: Bool,
+        action: @escaping () -> Void
+    ) -> some View {
+        Button(action: action) {
+            HStack(alignment: .top, spacing: 10) {
+                // Checkbox indicator
+                ZStack {
+                    RoundedRectangle(cornerRadius: 4, style: .continuous)
+                        .fill(isSelected
+                            ? Color(red: 0.26, green: 0.45, blue: 0.86)
+                            : Color.white.opacity(0.08))
+                        .frame(width: 18, height: 18)
+
+                    RoundedRectangle(cornerRadius: 4, style: .continuous)
+                        .strokeBorder(isSelected
+                            ? Color.clear
+                            : Color.white.opacity(0.2),
+                            lineWidth: 1)
+                        .frame(width: 18, height: 18)
+
+                    if isSelected {
+                        Image(systemName: "checkmark")
+                            .font(.system(size: 10, weight: .bold))
+                            .foregroundStyle(.white)
+                    }
+                }
+                .padding(.top, 1)
+
+                // Label + description
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(label)
+                        .font(.system(size: 12.5, weight: isSelected ? .semibold : .medium))
+                        .foregroundStyle(.white.opacity(isSelected ? 1 : 0.88))
+                        .fixedSize(horizontal: false, vertical: true)
+
+                    if let description {
+                        Text(description)
+                            .font(.system(size: 11, weight: .regular))
+                            .foregroundStyle(.white.opacity(0.45))
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                }
+
+                Spacer(minLength: 0)
+            }
+            .padding(.vertical, 7)
+            .padding(.horizontal, 10)
+            .background(
+                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                    .fill(isSelected
+                        ? Color.white.opacity(0.06)
+                        : Color.clear)
+            )
+        }
+        .buttonStyle(.plain)
+    }
+
+    // MARK: - Free-text input (for prompts with no options)
+
+    private var freeTextInputRow: some View {
+        HStack(spacing: 8) {
+            TextField(lang.t("question.placeholder"), text: $freeTextInput)
+                .textFieldStyle(.plain)
+                .font(.system(size: 12.5, weight: .medium))
+                .foregroundStyle(.white.opacity(0.9))
+                .padding(.horizontal, 12)
+                .padding(.vertical, 9)
+                .background(
+                    RoundedRectangle(cornerRadius: 10, style: .continuous)
+                        .fill(Color.white.opacity(0.06))
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: 10, style: .continuous)
+                        .strokeBorder(Color.white.opacity(0.1))
+                )
+                .onSubmit {
+                    guard !freeTextInput.trimmingCharacters(in: .whitespaces).isEmpty else { return }
+                    onAnswer(QuestionPromptResponse(answer: freeTextInput))
+                }
+
+            Button {
+                guard !freeTextInput.trimmingCharacters(in: .whitespaces).isEmpty else { return }
+                onAnswer(QuestionPromptResponse(answer: freeTextInput))
+            } label: {
+                Image(systemName: "arrow.up.circle.fill")
+                    .font(.system(size: 22))
+                    .foregroundStyle(
+                        freeTextInput.trimmingCharacters(in: .whitespaces).isEmpty
+                            ? .white.opacity(0.2)
+                            : Color(red: 0.26, green: 0.45, blue: 0.86)
+                    )
+            }
+            .buttonStyle(.plain)
+        }
+    }
+
+    // MARK: - Data
 
     private var structuredQuestions: [QuestionPromptItem] {
         prompt?.questions ?? []
