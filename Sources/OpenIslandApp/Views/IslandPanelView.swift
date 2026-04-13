@@ -20,6 +20,7 @@ private struct ContentHeightKey: PreferenceKey {
 /// When content exceeds maxHeight, wraps in ScrollView at fixed maxHeight.
 private struct AutoHeightScrollView<Content: View>: View {
     let maxHeight: CGFloat
+    var onHeightChange: ((CGFloat) -> Void)? = nil
     @ViewBuilder let content: () -> Content
     @State private var contentHeight: CGFloat = 0
 
@@ -45,7 +46,9 @@ private struct AutoHeightScrollView<Content: View>: View {
                 }
             )
             .onPreferenceChange(ContentHeightKey.self) { height in
-                if height > 0 { contentHeight = height }
+                guard height > 0 else { return }
+                contentHeight = height
+                onHeightChange?(min(height, maxHeight))
             }
     }
 }
@@ -113,6 +116,7 @@ struct IslandPanelView: View {
 
     @Namespace private var notchNamespace
     @State private var isHovering = false
+    @State private var measuredSessionListHeight: CGFloat = 0
 
     private var isOpened: Bool {
         model.notchStatus == .opened
@@ -248,8 +252,20 @@ struct IslandPanelView: View {
         let closedTotalWidth = closedNotchWidth + expansionWidth + (isPopping ? 18 : 0)
         let closedTotalHeight = closedNotchHeight
 
+        let maxOpenedBodyHeight = max(0, openedHeight - closedNotchHeight - 12)
+        let shouldTightenOpenedHeight = usesOpenedVisualState
+            && !model.shouldShowSessionBootstrapPlaceholder
+            && !model.islandListSessions.isEmpty
+            && !isNotificationMode
+            && measuredSessionListHeight > 0
+        let resolvedOpenedBodyHeight = shouldTightenOpenedHeight
+            ? min(maxOpenedBodyHeight, measuredSessionListHeight + 12)
+            : maxOpenedBodyHeight
+
         let currentWidth = usesOpenedVisualState ? openedWidth : closedTotalWidth
-        let currentHeight = usesOpenedVisualState ? openedHeight : closedTotalHeight
+        let currentHeight = usesOpenedVisualState
+            ? (closedNotchHeight + resolvedOpenedBodyHeight + 12)
+            : closedTotalHeight
         let horizontalInset = usesOpenedVisualState ? 14.0 : 0.0
         let bottomInset = usesOpenedVisualState ? 14.0 : 0.0
         let surfaceWidth = currentWidth + (horizontalInset * 2)
@@ -274,7 +290,7 @@ struct IslandPanelView: View {
 
                     openedContent
                         .frame(width: openedWidth - 24)
-                        .frame(maxHeight: usesOpenedVisualState ? currentHeight - closedNotchHeight - 12 : 0, alignment: .top)
+                        .frame(height: usesOpenedVisualState ? resolvedOpenedBodyHeight : 0, alignment: .top)
                         .opacity(usesOpenedVisualState ? 1 : 0)
                         .clipped()
                 }
@@ -540,7 +556,13 @@ struct IslandPanelView: View {
                     }
             } else {
                 // List mode: auto-height (fits content, scrolls only when exceeding max)
-                AutoHeightScrollView(maxHeight: Self.maxSessionListHeight) {
+                AutoHeightScrollView(
+                    maxHeight: Self.maxSessionListHeight,
+                    onHeightChange: { height in
+                    guard abs(measuredSessionListHeight - height) > 0.5 else { return }
+                    measuredSessionListHeight = height
+                    }
+                ) {
                     sessionListContent(context: context)
                 }
                 .padding(.vertical, 2)
