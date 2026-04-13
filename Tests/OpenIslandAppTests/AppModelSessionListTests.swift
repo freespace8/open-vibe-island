@@ -305,6 +305,49 @@ struct AppModelSessionListTests {
     }
 
     @Test
+    func bridgeEventsReviveErroneouslyEndedClaudeSessions() {
+        let now = Date(timeIntervalSince1970: 2_000)
+        let model = AppModel()
+
+        var session = AgentSession(
+            id: "claude-session",
+            title: "Claude · open-island",
+            tool: .claudeCode,
+            origin: .live,
+            attachmentState: .stale,
+            phase: .completed,
+            summary: "Temporarily disappeared",
+            updatedAt: now
+        )
+        session.isHookManaged = true
+        session.isSessionEnded = true
+        session.processNotSeenCount = 2
+
+        model.state = SessionState(sessions: [session])
+
+        #expect(model.liveSessionCount == 0)
+        #expect(model.state.session(id: "claude-session")?.isVisibleInIsland == false)
+
+        model.applyTrackedEvent(
+            .activityUpdated(
+                SessionActivityUpdated(
+                    sessionID: "claude-session",
+                    summary: "Claude is still executing.",
+                    phase: .running,
+                    timestamp: now.addingTimeInterval(1)
+                )
+            ),
+            updateLastActionMessage: false,
+            ingress: .bridge
+        )
+
+        #expect(model.liveSessionCount == 1)
+        #expect(model.state.session(id: "claude-session")?.attachmentState == .attached)
+        #expect(model.state.session(id: "claude-session")?.isSessionEnded == false)
+        #expect(model.state.session(id: "claude-session")?.phase == .running)
+    }
+
+    @Test
     func rolloutCompletionDoesNotPresentNotificationDuringColdStart() {
         let now = Date(timeIntervalSince1970: 2_000)
         let model = AppModel()
