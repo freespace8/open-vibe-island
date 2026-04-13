@@ -181,8 +181,10 @@ struct IslandPanelView: View {
             return 28
         }
 
-        let digitCount = "\(model.liveRunningCount)".count + "\(closedIdleCount)".count
-        return CGFloat(28 + (digitCount * 8))
+        let visibleCounts = [model.liveRunningCount, closedIdleCount].filter { $0 > 0 }
+        let digitCount = visibleCounts.reduce(0) { $0 + "\($1)".count }
+        let spacing: CGFloat = visibleCounts.count > 1 ? 6 : 0
+        return CGFloat(28 + (digitCount * 8)) + spacing
     }
 
     private var closedIdleCount: Int {
@@ -1930,10 +1932,14 @@ private struct ClosedCountBadge: View {
                 Text("…")
                     .foregroundStyle(.white.opacity(0.7))
             } else {
-                Text("\(runningCount)")
-                    .foregroundStyle(Color(red: 0.43, green: 0.62, blue: 1.0))
-                Text("\(idleCount)")
-                    .foregroundStyle(Color(red: 0.26, green: 0.91, blue: 0.42))
+                if runningCount > 0 {
+                    Text("\(runningCount)")
+                        .foregroundStyle(Color(red: 0.43, green: 0.62, blue: 1.0))
+                }
+                if idleCount > 0 {
+                    Text("\(idleCount)")
+                        .foregroundStyle(Color(red: 0.26, green: 0.91, blue: 0.42))
+                }
             }
         }
         .font(.system(size: 12, weight: .semibold))
