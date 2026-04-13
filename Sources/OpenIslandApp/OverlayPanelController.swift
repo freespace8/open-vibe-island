@@ -567,7 +567,10 @@ final class OverlayPanelController {
         }
 
         let rowHeights = visibleSessions.map { session -> CGFloat in
-            if session.id == actionableID {
+            // Include action body height when this session is the explicit
+            // actionable target OR when it needs attention (the SwiftUI view
+            // renders the inline action card for both cases).
+            if session.id == actionableID || session.phase.requiresAttention {
                 return session.estimatedIslandRowHeight(at: now)
                     + actionableBodyHeight(for: session, model: model)
             }
