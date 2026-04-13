@@ -19,7 +19,13 @@ final class OverlayPanelController {
     private static let openedContentVerticalInsets: CGFloat = 38
     private static let openedEmptyStateHeight: CGFloat = 108
     private static let approvalCardHeight: CGFloat = 288
-    private static let questionCardHeight: CGFloat = 110
+    /// Simple question card height: container padding (24) + title 2-line (36) + spacing (12)
+    /// + button row (36) + row bottom padding (14) + offset compensation (44) = 166
+    private static let questionCardBaseHeight: CGFloat = 166
+    /// Per structured-question height: header (16) + spacing (8) + question text (20) + spacing (8) + option buttons row (36) + inter-question spacing (12)
+    private static let questionItemHeight: CGFloat = 100
+    /// Submit button height when structured questions are present: spacing (12) + button (44)
+    private static let questionSubmitHeight: CGFloat = 56
     // Completion card chrome breakdown (everything except the scrollable text):
     // openedContent vertical padding: 24, card container padding: 28,
     // card VStack spacing: 14, card header (title+prompt): ~50,
@@ -613,7 +619,27 @@ final class OverlayPanelController {
     }
 
     private func questionCardHeight(for prompt: QuestionPrompt?) -> CGFloat {
-        Self.questionCardHeight
+        guard let prompt else {
+            return Self.questionCardBaseHeight
+        }
+
+        let questions = prompt.questions
+        guard !questions.isEmpty else {
+            // Simple option-only prompt. Estimate extra height if title is long
+            // (wraps to multiple lines with 13pt semibold Chinese text at ~480pt width).
+            let titleLength = prompt.title.count
+            let extraTitleLines = max(0, (titleLength - 20) / 20)
+            let titleOverflow = CGFloat(extraTitleLines) * 18
+            return Self.questionCardBaseHeight + titleOverflow
+        }
+
+        // Structured prompt: title + per-question blocks + submit button
+        // Title line: ~24pt, container padding: 24pt
+        let titleHeight: CGFloat = 48
+        let questionsHeight = CGFloat(questions.count) * Self.questionItemHeight
+        let estimated = titleHeight + questionsHeight + Self.questionSubmitHeight
+        // Cap at a reasonable maximum so the panel doesn't grow unbounded
+        return min(estimated, 500)
     }
 
     private func completionCardHeight(for model: AppModel) -> CGFloat {
