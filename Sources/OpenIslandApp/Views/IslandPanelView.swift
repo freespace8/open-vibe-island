@@ -1529,6 +1529,11 @@ private struct StructuredQuestionPromptView: View {
             RoundedRectangle(cornerRadius: 18, style: .continuous)
                 .strokeBorder(.white.opacity(0.06))
         )
+        // Prevent taps on blank areas within this container from falling
+        // through to the parent notchContent onTapGesture (which collapses
+        // the panel).
+        .contentShape(Rectangle())
+        .onTapGesture {}
     }
 
     // MARK: - Simple options (no structured questions)
