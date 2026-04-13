@@ -255,6 +255,80 @@ struct SessionStateTests {
     }
 
     @Test
+    func hookManagedActivityRevivesSessionAfterTransientProcessMiss() {
+        let startedAt = Date(timeIntervalSince1970: 6_500)
+        var session = AgentSession(
+            id: "claude-running",
+            title: "Claude · repo",
+            tool: .claudeCode,
+            attachmentState: .attached,
+            phase: .running,
+            summary: "Still working",
+            updatedAt: startedAt
+        )
+        session.isHookManaged = true
+        session.isProcessAlive = true
+
+        var state = SessionState(sessions: [session])
+
+        _ = state.markProcessLiveness(aliveSessionIDs: [])
+        _ = state.markProcessLiveness(aliveSessionIDs: [])
+
+        #expect(state.session(id: "claude-running")?.isSessionEnded == true)
+        #expect(state.session(id: "claude-running")?.isVisibleInIsland == false)
+
+        state.apply(
+            .activityUpdated(
+                SessionActivityUpdated(
+                    sessionID: "claude-running",
+                    summary: "Claude is still executing.",
+                    phase: .running,
+                    timestamp: startedAt.addingTimeInterval(8)
+                )
+            )
+        )
+
+        #expect(state.session(id: "claude-running")?.isSessionEnded == false)
+        #expect(state.session(id: "claude-running")?.isProcessAlive == true)
+        #expect(state.session(id: "claude-running")?.processNotSeenCount == 0)
+        #expect(state.session(id: "claude-running")?.isVisibleInIsland == true)
+    }
+
+    @Test
+    func hookManagedTurnCompletionClearsErroneousEndedFlag() {
+        let startedAt = Date(timeIntervalSince1970: 7_000)
+        var session = AgentSession(
+            id: "claude-stop",
+            title: "Claude · repo",
+            tool: .claudeCode,
+            attachmentState: .attached,
+            phase: .running,
+            summary: "Still working",
+            updatedAt: startedAt
+        )
+        session.isHookManaged = true
+        session.isSessionEnded = true
+        session.processNotSeenCount = 2
+
+        var state = SessionState(sessions: [session])
+
+        state.apply(
+            .sessionCompleted(
+                SessionCompleted(
+                    sessionID: "claude-stop",
+                    summary: "Claude finished the turn and is waiting.",
+                    timestamp: startedAt.addingTimeInterval(2),
+                    isSessionEnd: false
+                )
+            )
+        )
+
+        #expect(state.session(id: "claude-stop")?.isSessionEnded == false)
+        #expect(state.session(id: "claude-stop")?.phase == .completed)
+        #expect(state.session(id: "claude-stop")?.isVisibleInIsland == true)
+    }
+
+    @Test
     func preservesLiveSessionOriginFromStartEvent() {
         var state = SessionState()
 

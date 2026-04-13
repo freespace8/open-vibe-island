@@ -83,6 +83,8 @@ public struct SessionState: Equatable, Sendable {
                 return
             }
 
+            reviveHookManagedSessionIfNeeded(&session)
+
             let keepsPendingApproval = payload.phase == .running
                 && session.phase == .waitingForApproval
                 && session.permissionRequest != nil
@@ -110,6 +112,7 @@ public struct SessionState: Equatable, Sendable {
                 return
             }
 
+            reviveHookManagedSessionIfNeeded(&session)
             session.phase = .waitingForApproval
             session.summary = payload.request.summary
             session.permissionRequest = payload.request
@@ -122,6 +125,7 @@ public struct SessionState: Equatable, Sendable {
                 return
             }
 
+            reviveHookManagedSessionIfNeeded(&session)
             session.phase = .waitingForAnswer
             session.summary = payload.prompt.title
             session.questionPrompt = payload.prompt
@@ -134,14 +138,16 @@ public struct SessionState: Equatable, Sendable {
                 return
             }
 
+            if payload.isSessionEnd == true {
+                session.isSessionEnded = true
+            } else {
+                reviveHookManagedSessionIfNeeded(&session)
+            }
             session.phase = .completed
             session.summary = payload.summary
             session.permissionRequest = nil
             session.questionPrompt = nil
             session.updatedAt = payload.timestamp
-            if payload.isSessionEnd == true {
-                session.isSessionEnded = true
-            }
             upsert(session)
 
         case let .jumpTargetUpdated(payload):
@@ -149,6 +155,7 @@ public struct SessionState: Equatable, Sendable {
                 return
             }
 
+            reviveHookManagedSessionIfNeeded(&session)
             session.jumpTarget = payload.jumpTarget
             session.updatedAt = payload.timestamp
             upsert(session)
@@ -158,6 +165,7 @@ public struct SessionState: Equatable, Sendable {
                 return
             }
 
+            reviveHookManagedSessionIfNeeded(&session)
             session.codexMetadata = payload.codexMetadata.isEmpty ? nil : payload.codexMetadata
             session.updatedAt = payload.timestamp
             upsert(session)
@@ -167,6 +175,7 @@ public struct SessionState: Equatable, Sendable {
                 return
             }
 
+            reviveHookManagedSessionIfNeeded(&session)
             session.claudeMetadata = payload.claudeMetadata.isEmpty ? nil : payload.claudeMetadata
             session.updatedAt = payload.timestamp
             upsert(session)
@@ -176,6 +185,7 @@ public struct SessionState: Equatable, Sendable {
                 return
             }
 
+            reviveHookManagedSessionIfNeeded(&session)
             session.openCodeMetadata = payload.openCodeMetadata.isEmpty ? nil : payload.openCodeMetadata
             session.updatedAt = payload.timestamp
             upsert(session)
@@ -185,6 +195,7 @@ public struct SessionState: Equatable, Sendable {
                 return
             }
 
+            reviveHookManagedSessionIfNeeded(&session)
             session.cursorMetadata = payload.cursorMetadata.isEmpty ? nil : payload.cursorMetadata
             session.updatedAt = payload.timestamp
             upsert(session)
@@ -198,6 +209,7 @@ public struct SessionState: Equatable, Sendable {
                 return
             }
 
+            reviveHookManagedSessionIfNeeded(&session)
             session.phase = .running
             session.summary = payload.summary
             session.permissionRequest = nil
@@ -392,5 +404,15 @@ public struct SessionState: Equatable, Sendable {
 
     private mutating func upsert(_ session: AgentSession) {
         sessionsByID[session.id] = session
+    }
+
+    private mutating func reviveHookManagedSessionIfNeeded(_ session: inout AgentSession) {
+        guard session.isHookManaged else {
+            return
+        }
+
+        session.isSessionEnded = false
+        session.isProcessAlive = true
+        session.processNotSeenCount = 0
     }
 }
