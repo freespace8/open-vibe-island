@@ -177,8 +177,12 @@ struct IslandPanelView: View {
     }
 
     private var countBadgeWidth: CGFloat {
-        let digits = max(1, "\(model.liveSessionCount)".count)
-        return CGFloat(26 + max(0, digits - 1) * 8)
+        let characters = max(3, closedCountBadgeText.count)
+        return CGFloat(20 + (characters * 8))
+    }
+
+    private var closedCountBadgeText: String {
+        "\(model.liveRunningCount)/\(model.liveSessionCount)"
     }
 
     private var expansionWidth: CGFloat {
@@ -397,7 +401,7 @@ struct IslandPanelView: View {
 
                 if hasClosedPresence {
                     ClosedCountBadge(
-                        liveCount: model.liveSessionCount,
+                        label: closedCountBadgeText,
                         tint: closedSpotlightSession?.phase.requiresAttention == true ? .orange : scoutTint
                     )
                     .matchedGeometryEffect(id: "right-indicator", in: notchNamespace, isSource: true)
@@ -1908,11 +1912,11 @@ private struct AttentionIndicator: View {
 // MARK: - Closed count badge (right side of closed notch)
 
 private struct ClosedCountBadge: View {
-    let liveCount: Int
+    let label: String
     let tint: Color
 
     var body: some View {
-        Text("\(liveCount)")
+        Text(label)
             .font(.system(size: 12, weight: .semibold))
             .foregroundStyle(tint)
             .padding(.horizontal, 8)
