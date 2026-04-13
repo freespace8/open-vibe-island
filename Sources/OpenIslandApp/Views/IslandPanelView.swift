@@ -411,7 +411,6 @@ struct IslandPanelView: View {
                         idleCount: closedIdleCount,
                         showsLoadingState: model.shouldShowClosedBadgeLoadingState
                     )
-                    .matchedGeometryEffect(id: "right-indicator", in: notchNamespace, isSource: true)
                     .frame(width: max(sideWidth, countBadgeWidth))
                 }
             }
