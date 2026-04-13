@@ -10,6 +10,10 @@ struct HarnessLaunchConfiguration {
     let autoExitAfter: TimeInterval?
     let artifactDirectoryURL: URL?
 
+    var shouldPerformInitialBootAnimation: Bool {
+        scenario != nil && shouldPerformBootAnimation
+    }
+
     init(environment: [String: String] = ProcessInfo.processInfo.environment) {
         scenario = Self.scenarioValue(from: environment["OPEN_ISLAND_HARNESS_SCENARIO"])
         presentOverlay = Self.boolValue(

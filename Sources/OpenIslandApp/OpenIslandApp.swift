@@ -25,7 +25,7 @@ final class OpenIslandAppDelegate: NSObject, NSApplicationDelegate {
             model.disablesOverlayEventMonitoringDuringHarness = harnessLaunchConfiguration.scenario != nil
             model.startIfNeeded(
                 startBridge: harnessLaunchConfiguration.shouldStartBridge,
-                shouldPerformBootAnimation: harnessLaunchConfiguration.shouldPerformBootAnimation,
+                shouldPerformBootAnimation: harnessLaunchConfiguration.shouldPerformInitialBootAnimation,
                 loadRuntimeState: harnessLaunchConfiguration.scenario == nil
             )
             harnessRuntimeMonitor.recordMilestone("modelStarted")
