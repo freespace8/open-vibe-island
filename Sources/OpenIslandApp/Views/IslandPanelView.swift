@@ -177,15 +177,16 @@ struct IslandPanelView: View {
     }
 
     private var countBadgeWidth: CGFloat {
-        let characters = max(3, closedCountBadgeText.count)
-        return CGFloat(20 + (characters * 8))
+        if model.shouldShowClosedBadgeLoadingState {
+            return 28
+        }
+
+        let digitCount = "\(model.liveRunningCount)".count + "\(closedIdleCount)".count
+        return CGFloat(28 + (digitCount * 8))
     }
 
-    private var closedCountBadgeText: String {
-        if model.shouldShowClosedBadgeLoadingState {
-            return "…"
-        }
-        return "\(model.liveRunningCount)/\(model.liveSessionCount)"
+    private var closedIdleCount: Int {
+        max(0, model.liveSessionCount - model.liveRunningCount)
     }
 
     private var expansionWidth: CGFloat {
@@ -404,8 +405,9 @@ struct IslandPanelView: View {
 
                 if hasClosedPresence {
                     ClosedCountBadge(
-                        label: closedCountBadgeText,
-                        tint: closedSpotlightSession?.phase.requiresAttention == true ? .orange : scoutTint
+                        runningCount: model.liveRunningCount,
+                        idleCount: closedIdleCount,
+                        showsLoadingState: model.shouldShowClosedBadgeLoadingState
                     )
                     .matchedGeometryEffect(id: "right-indicator", in: notchNamespace, isSource: true)
                     .frame(width: max(sideWidth, countBadgeWidth))
@@ -1918,15 +1920,25 @@ private struct AttentionIndicator: View {
 // MARK: - Closed count badge (right side of closed notch)
 
 private struct ClosedCountBadge: View {
-    let label: String
-    let tint: Color
+    let runningCount: Int
+    let idleCount: Int
+    let showsLoadingState: Bool
 
     var body: some View {
-        Text(label)
-            .font(.system(size: 12, weight: .semibold))
-            .foregroundStyle(tint)
-            .padding(.horizontal, 8)
-            .padding(.vertical, 2)
+        HStack(spacing: 6) {
+            if showsLoadingState {
+                Text("…")
+                    .foregroundStyle(.white.opacity(0.7))
+            } else {
+                Text("\(runningCount)")
+                    .foregroundStyle(Color(red: 0.43, green: 0.62, blue: 1.0))
+                Text("\(idleCount)")
+                    .foregroundStyle(Color(red: 0.26, green: 0.91, blue: 0.42))
+            }
+        }
+        .font(.system(size: 12, weight: .semibold))
+        .padding(.horizontal, 8)
+        .padding(.vertical, 2)
             .background(Color(red: 0.14, green: 0.14, blue: 0.15), in: Capsule())
     }
 }
