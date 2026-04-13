@@ -1229,7 +1229,7 @@ final class AppModel {
         var primary: [AgentSession] = []
         var claimedLiveAttachmentKeys: Set<String> = []
 
-        for session in rankedSessions where session.isVisibleInIsland {
+        for session in rankedSessions where shouldSurfaceInPrimaryBucket(session) {
             guard !session.isSubagentSession else { continue }
 
             if let liveAttachmentKey = monitoring.liveAttachmentKey(for: session) {
@@ -1244,6 +1244,22 @@ final class AppModel {
         let primaryIDs = Set(primary.map(\.id))
         let overflow = rankedSessions.filter { !primaryIDs.contains($0.id) && !$0.isSubagentSession }
         return (primary, overflow)
+    }
+
+    private func shouldSurfaceInPrimaryBucket(_ session: AgentSession) -> Bool {
+        guard session.isVisibleInIsland else {
+            return false
+        }
+
+        guard isResolvingInitialLiveSessions, session.isTrackedLiveSession else {
+            return true
+        }
+
+        if session.phase.requiresAttention {
+            return true
+        }
+
+        return session.isProcessAlive || session.isAttachedToTerminal
     }
 
     private func displayPriority(for session: AgentSession, now: Date) -> Int {

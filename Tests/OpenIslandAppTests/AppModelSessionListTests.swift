@@ -226,6 +226,58 @@ struct AppModelSessionListTests {
     }
 
     @Test
+    func startupResolutionKeepsRecoveredHookManagedSessionsOutOfClosedCountsUntilConfirmedLive() {
+        let now = Date(timeIntervalSince1970: 2_000)
+        let model = AppModel()
+        model.isResolvingInitialLiveSessions = true
+
+        var recovered = AgentSession(
+            id: "recovered-hook-session",
+            title: "Claude · open-island",
+            tool: .claudeCode,
+            origin: .live,
+            attachmentState: .stale,
+            phase: .running,
+            summary: "Recovered from local registry",
+            updatedAt: now
+        )
+        recovered.isHookManaged = true
+
+        model.state = SessionState(sessions: [recovered])
+
+        #expect(model.liveSessionCount == 0)
+        #expect(model.surfacedSessions.isEmpty)
+        #expect(model.recentSessions.map(\.id) == ["recovered-hook-session"])
+        #expect(model.shouldShowClosedBadgeLoadingState)
+    }
+
+    @Test
+    func startupResolutionShowsRecoveredHookManagedSessionOnceConfirmedAlive() {
+        let now = Date(timeIntervalSince1970: 2_000)
+        let model = AppModel()
+        model.isResolvingInitialLiveSessions = true
+
+        var recovered = AgentSession(
+            id: "recovered-hook-session",
+            title: "Claude · open-island",
+            tool: .claudeCode,
+            origin: .live,
+            attachmentState: .attached,
+            phase: .running,
+            summary: "Recovered from local registry",
+            updatedAt: now
+        )
+        recovered.isHookManaged = true
+        recovered.isProcessAlive = true
+
+        model.state = SessionState(sessions: [recovered])
+
+        #expect(model.liveSessionCount == 1)
+        #expect(model.surfacedSessions.map(\.id) == ["recovered-hook-session"])
+        #expect(model.shouldShowClosedBadgeLoadingState)
+    }
+
+    @Test
     func jumpToSessionClosesOverlayBeforeTerminalJumpFinishes() async throws {
         let now = Date(timeIntervalSince1970: 2_000)
         let model = AppModel { _ in
