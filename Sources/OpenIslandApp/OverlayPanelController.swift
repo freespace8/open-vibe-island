@@ -649,7 +649,17 @@ final class OverlayPanelController {
             let titleLength = prompt.title.count
             let extraTitleLines = max(0, (titleLength - 20) / 20)
             let titleOverflow = CGFloat(extraTitleLines) * 18
-            return Self.questionCardBaseHeight + titleOverflow
+
+            let hasOptions = !prompt.options.isEmpty
+            if hasOptions {
+                return Self.questionCardBaseHeight + titleOverflow
+            }
+
+            // No options: just the title label inside a padded container.
+            // container vertical padding (24) + title (~18) + row bottom padding (14)
+            // + actionableBodyHeight offset compensation (44)
+            let minimalHeight: CGFloat = 100
+            return minimalHeight + titleOverflow
         }
 
         // Structured prompt: title + per-question blocks + submit button
