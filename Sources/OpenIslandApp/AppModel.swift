@@ -551,6 +551,10 @@ final class AppModel {
         surfacedSessions.filter { $0.phase == .running }.count
     }
 
+    var shouldShowClosedBadgeLoadingState: Bool {
+        isResolvingInitialLiveSessions
+    }
+
     var shouldShowSessionBootstrapPlaceholder: Bool {
         isResolvingInitialLiveSessions
             && liveSessionCount == 0

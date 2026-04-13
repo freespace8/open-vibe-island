@@ -160,6 +160,7 @@ struct AppModelSessionListTests {
 
         #expect(model.liveSessionCount == 0)
         #expect(model.shouldShowSessionBootstrapPlaceholder)
+        #expect(model.shouldShowClosedBadgeLoadingState)
     }
 
     @Test
@@ -184,6 +185,44 @@ struct AppModelSessionListTests {
 
         #expect(model.liveSessionCount == 1)
         #expect(!model.shouldShowSessionBootstrapPlaceholder)
+        #expect(model.shouldShowClosedBadgeLoadingState)
+    }
+
+    @Test
+    func closedBadgeUsesLoadingStateDuringStartupEvenWithRestoredSessions() {
+        let now = Date(timeIntervalSince1970: 2_000)
+        let model = AppModel()
+        model.isResolvingInitialLiveSessions = true
+
+        var runningLive = AgentSession(
+            id: "running-live",
+            title: "Codex · open-island",
+            tool: .codex,
+            origin: .live,
+            attachmentState: .attached,
+            phase: .running,
+            summary: "Current live turn",
+            updatedAt: now
+        )
+        runningLive.isProcessAlive = true
+
+        var recovered = AgentSession(
+            id: "recovered-live",
+            title: "Codex · open-island",
+            tool: .codex,
+            origin: .live,
+            attachmentState: .attached,
+            phase: .completed,
+            summary: "Recovered turn",
+            updatedAt: now.addingTimeInterval(-10)
+        )
+        recovered.isProcessAlive = true
+
+        model.state = SessionState(sessions: [runningLive, recovered])
+
+        #expect(model.liveRunningCount == 1)
+        #expect(model.liveSessionCount == 2)
+        #expect(model.shouldShowClosedBadgeLoadingState)
     }
 
     @Test

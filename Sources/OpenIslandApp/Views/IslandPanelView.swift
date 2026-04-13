@@ -182,7 +182,10 @@ struct IslandPanelView: View {
     }
 
     private var closedCountBadgeText: String {
-        "\(model.liveRunningCount)/\(model.liveSessionCount)"
+        if model.shouldShowClosedBadgeLoadingState {
+            return "…"
+        }
+        return "\(model.liveRunningCount)/\(model.liveSessionCount)"
     }
 
     private var expansionWidth: CGFloat {
