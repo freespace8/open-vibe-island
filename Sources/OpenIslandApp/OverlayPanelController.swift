@@ -40,6 +40,10 @@ final class OverlayPanelController {
     private var eventMonitors = NotchEventMonitors()
     private var hoverTimer: DispatchWorkItem?
     private var hoverCancelGrace: DispatchWorkItem?
+    /// Guards against reentrancy during `positionPanel` → `setFrame` →
+    /// synchronous layout → preference change → `refreshOverlayPlacement`
+    /// → `positionPanel` infinite loop.
+    private var isPositioningPanel = false
     weak var model: AppModel?
     private(set) var notchRect: NSRect = .zero
 
@@ -153,6 +157,16 @@ final class OverlayPanelController {
         preferredScreenID: String?,
         animated: Bool
     ) -> OverlayPlacementDiagnostics? {
+        // Reentrancy guard: setFrame() synchronously triggers
+        // NSHostingView.layout() → SwiftUI GeometryReader → preference
+        // change → measuredNotificationContentHeight.didSet →
+        // refreshOverlayPlacement() → positionPanel().  Without this
+        // guard the recursion loops until the stack overflows or the
+        // main thread starves.
+        guard !isPositioningPanel else {
+            return nil
+        }
+
         guard let screen = resolveTargetScreen(preferredScreenID: preferredScreenID) else {
             return nil
         }
@@ -166,7 +180,9 @@ final class OverlayPanelController {
         // visible jank because the two systems have different timing curves,
         // durations, and start times (AppKit was deferred by one runloop).
         if panel.frame != windowFrame {
+            isPositioningPanel = true
             panel.setFrame(windowFrame, display: true)
+            isPositioningPanel = false
         }
         computeNotchRect(screen: screen)
 
