@@ -340,6 +340,9 @@ final class ProcessMonitoringCoordinator {
                 for session in sessions where session.claudeMetadata?.transcriptPath == transcript {
                     matchedIDs.insert(session.id)
                 }
+                for session in sessions where session.piMetadata?.transcriptPath == transcript {
+                    matchedIDs.insert(session.id)
+                }
             }
 
             if !matchedIDs.isEmpty {
@@ -366,6 +369,15 @@ final class ProcessMonitoringCoordinator {
         )
         for session in sessions where session.tool == .codex && !session.isDemoSession {
             if codexProcessIDs.contains(session.id) {
+                aliveIDs.insert(session.id)
+            }
+        }
+
+        let piProcesses = activeProcesses.filter { $0.tool == .piAgent }
+        let piProcessIDs = Set(piProcesses.compactMap(\.sessionID))
+        for session in sessions where session.tool == .piAgent && !session.isDemoSession {
+            if piProcessIDs.contains(session.id)
+                || piProcesses.contains(where: { $0.transcriptPath == session.piMetadata?.transcriptPath && $0.transcriptPath != nil }) {
                 aliveIDs.insert(session.id)
             }
         }
@@ -889,6 +901,10 @@ final class ProcessMonitoringCoordinator {
             return .codex
         }
 
+        if normalized.contains("pi") {
+            return .piAgent
+        }
+
         if normalized.contains("claude") {
             return .claudeCode
         }
@@ -900,6 +916,8 @@ final class ProcessMonitoringCoordinator {
         switch session.tool {
         case .codex:
             return "Codex \(session.id.prefix(8))"
+        case .piAgent:
+            return "Pi \(session.id.prefix(8))"
         case .claudeCode:
             return "Claude \(session.id.prefix(8))"
         case .geminiCLI:

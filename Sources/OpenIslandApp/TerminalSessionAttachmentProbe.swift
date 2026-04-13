@@ -543,7 +543,7 @@ struct TerminalSessionAttachmentProbe {
         // prompt like "~/project"), do not match it to agent sessions.  This
         // prevents Claude/Codex sessions from binding to an unrelated terminal
         // that just happens to share the same working directory.
-        if snapshotHint == nil && (session.tool == .claudeCode || session.tool == .codex) {
+        if snapshotHint == nil && (session.tool == .claudeCode || session.tool == .codex || session.tool == .piAgent) {
             return false
         }
 
@@ -669,6 +669,10 @@ struct TerminalSessionAttachmentProbe {
         let normalizedTitle = title.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         if normalizedTitle.contains("codex") {
             return .codex
+        }
+
+        if normalizedTitle.contains("pi") {
+            return .piAgent
         }
 
         if normalizedTitle.contains("claude") {
@@ -921,12 +925,23 @@ struct TerminalSessionAttachmentProbe {
                 .filter { $0.tool == .codex }
                 .compactMap(\.sessionID)
         )
+        let activePiSessionIDs = Set(
+            activeProcesses
+                .filter { $0.tool == .piAgent }
+                .compactMap(\.sessionID)
+        )
         let activeClaudeProcesses = activeProcesses.filter { $0.tool == .claudeCode }
 
         for session in sessions {
             if session.tool == .codex,
                activeCodexSessionIDs.contains(session.id),
                let matchedProcess = activeProcesses.first(where: { $0.tool == .codex && $0.sessionID == session.id }) {
+                assignments[session.id] = matchedProcess
+            }
+
+            if session.tool == .piAgent,
+               activePiSessionIDs.contains(session.id),
+               let matchedProcess = activeProcesses.first(where: { $0.tool == .piAgent && $0.sessionID == session.id }) {
                 assignments[session.id] = matchedProcess
             }
         }

@@ -3,6 +3,7 @@ import Foundation
 public enum AgentTool: String, CaseIterable, Codable, Sendable {
     case claudeCode
     case codex
+    case piAgent
     case geminiCLI
     case openCode
     case qoder
@@ -17,6 +18,8 @@ public enum AgentTool: String, CaseIterable, Codable, Sendable {
             "Claude Code"
         case .codex:
             "Codex"
+        case .piAgent:
+            "Pi Agent"
         case .geminiCLI:
             "Gemini CLI"
         case .openCode:
@@ -40,6 +43,8 @@ public enum AgentTool: String, CaseIterable, Codable, Sendable {
             "CLAUDE"
         case .codex:
             "CODEX"
+        case .piAgent:
+            "PI"
         case .geminiCLI:
             "GEMINI"
         case .openCode:
@@ -321,6 +326,7 @@ public struct AgentSession: Equatable, Identifiable, Codable, Sendable {
     public var questionPrompt: QuestionPrompt?
     public var jumpTarget: JumpTarget?
     public var codexMetadata: CodexSessionMetadata?
+    public var piMetadata: PiSessionMetadata?
     public var claudeMetadata: ClaudeSessionMetadata?
     public var openCodeMetadata: OpenCodeSessionMetadata?
     public var cursorMetadata: CursorSessionMetadata?
@@ -359,6 +365,7 @@ public struct AgentSession: Equatable, Identifiable, Codable, Sendable {
         questionPrompt: QuestionPrompt? = nil,
         jumpTarget: JumpTarget? = nil,
         codexMetadata: CodexSessionMetadata? = nil,
+        piMetadata: PiSessionMetadata? = nil,
         claudeMetadata: ClaudeSessionMetadata? = nil,
         openCodeMetadata: OpenCodeSessionMetadata? = nil,
         cursorMetadata: CursorSessionMetadata? = nil
@@ -375,6 +382,7 @@ public struct AgentSession: Equatable, Identifiable, Codable, Sendable {
         self.questionPrompt = questionPrompt
         self.jumpTarget = jumpTarget
         self.codexMetadata = codexMetadata
+        self.piMetadata = piMetadata
         self.claudeMetadata = claudeMetadata
         self.openCodeMetadata = openCodeMetadata
         self.cursorMetadata = cursorMetadata
@@ -393,6 +401,7 @@ public struct AgentSession: Equatable, Identifiable, Codable, Sendable {
         case questionPrompt
         case jumpTarget
         case codexMetadata
+        case piMetadata
         case claudeMetadata
         case openCodeMetadata
         case cursorMetadata
@@ -412,6 +421,7 @@ public struct AgentSession: Equatable, Identifiable, Codable, Sendable {
         questionPrompt = try container.decodeIfPresent(QuestionPrompt.self, forKey: .questionPrompt)
         jumpTarget = try container.decodeIfPresent(JumpTarget.self, forKey: .jumpTarget)
         codexMetadata = try container.decodeIfPresent(CodexSessionMetadata.self, forKey: .codexMetadata)
+        piMetadata = try container.decodeIfPresent(PiSessionMetadata.self, forKey: .piMetadata)
         claudeMetadata = try container.decodeIfPresent(ClaudeSessionMetadata.self, forKey: .claudeMetadata)
         openCodeMetadata = try container.decodeIfPresent(OpenCodeSessionMetadata.self, forKey: .openCodeMetadata)
         cursorMetadata = try container.decodeIfPresent(CursorSessionMetadata.self, forKey: .cursorMetadata)
@@ -431,6 +441,7 @@ public struct AgentSession: Equatable, Identifiable, Codable, Sendable {
         try container.encodeIfPresent(questionPrompt, forKey: .questionPrompt)
         try container.encodeIfPresent(jumpTarget, forKey: .jumpTarget)
         try container.encodeIfPresent(codexMetadata, forKey: .codexMetadata)
+        try container.encodeIfPresent(piMetadata, forKey: .piMetadata)
         try container.encodeIfPresent(claudeMetadata, forKey: .claudeMetadata)
         try container.encodeIfPresent(openCodeMetadata, forKey: .openCodeMetadata)
         try container.encodeIfPresent(cursorMetadata, forKey: .cursorMetadata)
@@ -443,7 +454,7 @@ public extension AgentSession {
     }
 
     var isTrackedLiveSession: Bool {
-        !isDemoSession && (tool == .codex || tool == .claudeCode || tool == .openCode || tool == .qoder || tool == .qwenCode || tool == .factory || tool == .codebuddy || tool == .cursor)
+        !isDemoSession && (tool == .codex || tool == .piAgent || tool == .claudeCode || tool == .openCode || tool == .qoder || tool == .qwenCode || tool == .factory || tool == .codebuddy || tool == .cursor)
     }
 
     var isTrackedLiveCodexSession: Bool {
@@ -466,26 +477,26 @@ public extension AgentSession {
     }
 
     var currentToolName: String? {
-        codexMetadata?.currentTool ?? claudeMetadata?.currentTool ?? openCodeMetadata?.currentTool ?? cursorMetadata?.currentTool
+        codexMetadata?.currentTool ?? piMetadata?.currentTool ?? claudeMetadata?.currentTool ?? openCodeMetadata?.currentTool ?? cursorMetadata?.currentTool
     }
 
     var lastAssistantMessageText: String? {
-        codexMetadata?.lastAssistantMessage ?? claudeMetadata?.lastAssistantMessage ?? openCodeMetadata?.lastAssistantMessage ?? cursorMetadata?.lastAssistantMessage
+        codexMetadata?.lastAssistantMessage ?? piMetadata?.lastAssistantMessage ?? claudeMetadata?.lastAssistantMessage ?? openCodeMetadata?.lastAssistantMessage ?? cursorMetadata?.lastAssistantMessage
     }
 
     var trackingTranscriptPath: String? {
-        codexMetadata?.transcriptPath ?? claudeMetadata?.transcriptPath
+        codexMetadata?.transcriptPath ?? piMetadata?.transcriptPath ?? claudeMetadata?.transcriptPath
     }
 
     var latestUserPromptText: String? {
-        codexMetadata?.lastUserPrompt ?? claudeMetadata?.lastUserPrompt ?? openCodeMetadata?.lastUserPrompt ?? cursorMetadata?.lastUserPrompt
+        codexMetadata?.lastUserPrompt ?? piMetadata?.lastUserPrompt ?? claudeMetadata?.lastUserPrompt ?? openCodeMetadata?.lastUserPrompt ?? cursorMetadata?.lastUserPrompt
     }
 
     var initialUserPromptText: String? {
-        codexMetadata?.initialUserPrompt ?? claudeMetadata?.initialUserPrompt ?? openCodeMetadata?.initialUserPrompt ?? cursorMetadata?.initialUserPrompt
+        codexMetadata?.initialUserPrompt ?? piMetadata?.initialUserPrompt ?? claudeMetadata?.initialUserPrompt ?? openCodeMetadata?.initialUserPrompt ?? cursorMetadata?.initialUserPrompt
     }
 
     var currentCommandPreviewText: String? {
-        codexMetadata?.currentCommandPreview ?? claudeMetadata?.currentToolInputPreview ?? openCodeMetadata?.currentToolInputPreview ?? cursorMetadata?.currentToolInputPreview
+        codexMetadata?.currentCommandPreview ?? piMetadata?.currentCommandPreview ?? claudeMetadata?.currentToolInputPreview ?? openCodeMetadata?.currentToolInputPreview ?? cursorMetadata?.currentToolInputPreview
     }
 }

@@ -238,6 +238,8 @@ public struct SessionState: Equatable, Sendable {
                 session.summary = "Permission approved. \(session.tool.displayName) continued the tool."
             case .openCode:
                 session.summary = "Permission approved. OpenCode continued the tool."
+            case .piAgent:
+                session.summary = "Pi Agent resumed work."
             default:
                 session.summary = "Permission approved. Agent resumed work."
             }
@@ -248,6 +250,8 @@ public struct SessionState: Equatable, Sendable {
                 session.summary = "Permission denied in Open Island."
             case .openCode:
                 session.summary = "Permission denied in Open Island."
+            case .piAgent:
+                session.summary = "Permission denied. Review the Pi session in the terminal."
             default:
                 session.summary = "Permission denied. Review the session in the terminal."
             }

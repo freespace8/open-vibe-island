@@ -119,6 +119,21 @@ struct ActiveAgentProcessDiscovery {
                 continue
             }
 
+            if isPiProcess(command: process.command) {
+                guard var snapshot = piSnapshot(for: process, processesByPID: processesByPID) else {
+                    continue
+                }
+
+                let claimKey = "pi:\(snapshot.sessionID ?? snapshot.transcriptPath ?? snapshot.terminalTTY ?? process.pid)"
+                guard claimedKeys.insert(claimKey).inserted else {
+                    continue
+                }
+
+                snapshot.processPID = Int32(process.pid)
+                snapshots.append(snapshot)
+                continue
+            }
+
             if isOpenCodeProcess(command: process.command) {
                 let claimKey = "opencode:\(process.pid)"
                 guard claimedKeys.insert(claimKey).inserted else {
@@ -192,7 +207,7 @@ struct ActiveAgentProcessDiscovery {
     private static func isInterestingShortName(_ name: String) -> Bool {
         let lower = name.lowercased()
         // Agent CLIs
-        if lower == "codex" || lower == "claude" || lower == "opencode" { return true }
+        if lower == "codex" || lower == "claude" || lower == "opencode" || lower == "pi" { return true }
         // Node.js (Claude Code, Codex, OpenCode may run under node)
         if lower == "node" { return true }
         // Terminal emulators (needed for parent-chain terminal app resolution)
@@ -363,6 +378,46 @@ struct ActiveAgentProcessDiscovery {
         )
 
         // If terminalApp is nil and we have a TTY, try to resolve tmux info
+        if snapshot.terminalApp == nil, let agentTTY = process.terminalTTY {
+            if let (tmuxTarget, hostTerminalApp, socketPath) = resolveTmuxInfo(
+                agentTTY: agentTTY,
+                processes: processesByPID.values.map { $0 },
+                processesByPID: processesByPID
+            ) {
+                snapshot.terminalApp = hostTerminalApp
+                snapshot.tmuxTarget = tmuxTarget
+                snapshot.tmuxSocketPath = socketPath
+            }
+        }
+
+        return snapshot
+    }
+
+    private func piSnapshot(
+        for process: RunningProcess,
+        processesByPID: [String: RunningProcess]
+    ) -> ProcessSnapshot? {
+        let lsofOutput = lsofOutput(pid: process.pid)
+        let workingDirectory = lsofOutput.flatMap(workingDirectory(from:))
+        let transcriptPath = lsofOutput.flatMap {
+            matchingPath(in: $0, containing: "/.pi/agent/sessions/", suffix: ".jsonl")
+        }
+        let sessionID = transcriptPath.flatMap(firstUUID(in:))
+            ?? sessionID(from: process.command, flags: ["--session", "--resume", "-r"])
+
+        guard workingDirectory != nil || sessionID != nil || transcriptPath != nil else {
+            return nil
+        }
+
+        var snapshot = ProcessSnapshot(
+            tool: .piAgent,
+            sessionID: sessionID,
+            workingDirectory: workingDirectory,
+            terminalTTY: process.terminalTTY,
+            terminalApp: terminalApp(for: process, processesByPID: processesByPID),
+            transcriptPath: transcriptPath
+        )
+
         if snapshot.terminalApp == nil, let agentTTY = process.terminalTTY {
             if let (tmuxTarget, hostTerminalApp, socketPath) = resolveTmuxInfo(
                 agentTTY: agentTTY,
@@ -580,6 +635,10 @@ struct ActiveAgentProcessDiscovery {
     }
 
     private func claudeSessionID(from command: String) -> String? {
+        sessionID(from: command, flags: ["--resume", "-r", "--session-id"])
+    }
+
+    private func sessionID(from command: String, flags: [String]) -> String? {
         let tokens = command.split(whereSeparator: \.isWhitespace).map(String.init)
         guard !tokens.isEmpty else {
             return nil
@@ -588,7 +647,7 @@ struct ActiveAgentProcessDiscovery {
         for index in tokens.indices {
             let token = tokens[index]
 
-            if token == "--resume" || token == "-r" || token == "--session-id" {
+            if flags.contains(token) {
                 let nextIndex = tokens.index(after: index)
                 guard tokens.indices.contains(nextIndex) else {
                     continue
@@ -599,7 +658,7 @@ struct ActiveAgentProcessDiscovery {
                 }
             }
 
-            if token.hasPrefix("--resume=") || token.hasPrefix("--session-id=") {
+            for flag in flags where token.hasPrefix("\(flag)=") {
                 let value = String(token.split(separator: "=", maxSplits: 1).last ?? "")
                 if let sessionID = firstUUID(in: value) {
                     return sessionID
@@ -642,6 +701,17 @@ struct ActiveAgentProcessDiscovery {
         let lowered = command.lowercased()
         return lowered.contains("/opencode-ai/") || lowered.contains("/opencode")
             || lowered.contains("/.opencode")
+    }
+
+    private func isPiProcess(command: String) -> Bool {
+        let lowered = command.lowercased()
+        guard let firstToken = lowered.split(separator: " ").first.map(String.init) else {
+            return false
+        }
+
+        return firstToken == "pi"
+            || firstToken.hasSuffix("/pi")
+            || lowered.contains("/.pi/agent")
     }
 
     private func isClaudeProcess(command: String) -> Bool {

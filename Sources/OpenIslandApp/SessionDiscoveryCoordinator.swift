@@ -10,11 +10,14 @@ final class SessionDiscoveryCoordinator {
     struct StartupDiscoveryPayload: Sendable {
         var codexRecords: [CodexTrackedSessionRecord]
         var codexRecordsNeedPrune: Bool
+        var piRecords: [PiTrackedSessionRecord]
+        var piRecordsNeedPrune: Bool
         var claudeRecords: [ClaudeTrackedSessionRecord]
         var claudeRecordsNeedPrune: Bool
         var cursorRecords: [CursorTrackedSessionRecord]
         var cursorRecordsNeedPrune: Bool
         var discoveredCodexRecords: [CodexTrackedSessionRecord]
+        var discoveredPiSessions: [AgentSession]
         var discoveredClaudeSessions: [AgentSession]
         var hooksBinaryURL: URL?
     }
@@ -41,6 +44,9 @@ final class SessionDiscoveryCoordinator {
     private let claudeSessionRegistry = ClaudeSessionRegistry()
 
     @ObservationIgnored
+    private let piSessionRegistry = PiSessionRegistry()
+
+    @ObservationIgnored
     private let cursorSessionRegistry = CursorSessionRegistry()
 
     @ObservationIgnored
@@ -50,6 +56,9 @@ final class SessionDiscoveryCoordinator {
     private let codexRolloutDiscovery = CodexRolloutDiscovery()
 
     @ObservationIgnored
+    private let piSessionDiscovery = PiSessionDiscovery()
+
+    @ObservationIgnored
     private let claudeTranscriptDiscovery = ClaudeTranscriptDiscovery()
 
     @ObservationIgnored
@@ -57,6 +66,9 @@ final class SessionDiscoveryCoordinator {
 
     @ObservationIgnored
     private var claudeSessionPersistenceTask: Task<Void, Never>?
+
+    @ObservationIgnored
+    private var piSessionPersistenceTask: Task<Void, Never>?
 
     @ObservationIgnored
     private var cursorSessionPersistenceTask: Task<Void, Never>?
@@ -78,6 +90,9 @@ final class SessionDiscoveryCoordinator {
         let allCodex = (try? codexSessionStore.load()) ?? []
         let codexRecords = allCodex.filter { $0.updatedAt >= cutoff && $0.shouldRestoreToLiveState }
 
+        let allPi = (try? piSessionRegistry.load()) ?? []
+        let piRecords = allPi.filter { $0.updatedAt >= cutoff && $0.shouldRestoreToLiveState }
+
         let allClaude = (try? claudeSessionRegistry.load()) ?? []
         let claudeRecords = allClaude.filter { $0.updatedAt >= cutoff && $0.shouldRestoreToLiveState }
 
@@ -85,16 +100,20 @@ final class SessionDiscoveryCoordinator {
         let cursorRecords = allCursor.filter { $0.updatedAt >= cutoff && $0.shouldRestoreToLiveState }
 
         let discoveredCodex = codexRolloutDiscovery.discoverRecentSessions()
+        let discoveredPi = piSessionDiscovery.discoverRecentSessions()
         let discoveredClaude = claudeTranscriptDiscovery.discoverRecentSessions()
 
         return StartupDiscoveryPayload(
             codexRecords: codexRecords,
             codexRecordsNeedPrune: codexRecords != allCodex,
+            piRecords: piRecords,
+            piRecordsNeedPrune: piRecords != allPi,
             claudeRecords: claudeRecords,
             claudeRecordsNeedPrune: claudeRecords != allClaude,
             cursorRecords: cursorRecords,
             cursorRecordsNeedPrune: cursorRecords != allCursor,
             discoveredCodexRecords: discoveredCodex,
+            discoveredPiSessions: discoveredPi,
             discoveredClaudeSessions: discoveredClaude,
             hooksBinaryURL: HooksBinaryLocator.locate(
                 executableDirectory: Bundle.main.executableURL?.deletingLastPathComponent()
@@ -109,6 +128,9 @@ final class SessionDiscoveryCoordinator {
         if payload.codexRecordsNeedPrune {
             try? codexSessionStore.save(payload.codexRecords)
         }
+        if payload.piRecordsNeedPrune {
+            try? piSessionRegistry.save(payload.piRecords)
+        }
         if payload.claudeRecordsNeedPrune {
             try? claudeSessionRegistry.save(payload.claudeRecords)
         }
@@ -120,6 +142,12 @@ final class SessionDiscoveryCoordinator {
         if !payload.codexRecords.isEmpty {
             state = SessionState(sessions: payload.codexRecords.map(\.restorableSession))
             onStatusMessage?("Restored \(payload.codexRecords.count) recent Codex session(s) from local cache.")
+        }
+
+        if !payload.piRecords.isEmpty {
+            let restoredSessions = payload.piRecords.map(\.restorableSession)
+            state = SessionState(sessions: mergeDiscoveredSessions(restoredSessions))
+            onStatusMessage?("Restored \(payload.piRecords.count) recent Pi session(s) from local registry.")
         }
 
         // Restore persisted Claude sessions.
@@ -142,6 +170,13 @@ final class SessionDiscoveryCoordinator {
             state = SessionState(sessions: mergedSessions)
             scheduleCodexSessionPersistence()
             onStatusMessage?("Discovered \(payload.discoveredCodexRecords.count) recent Codex session(s) from local rollouts.")
+        }
+
+        if !payload.discoveredPiSessions.isEmpty {
+            let mergedSessions = mergeDiscoveredSessions(payload.discoveredPiSessions)
+            state = SessionState(sessions: mergedSessions)
+            schedulePiSessionPersistence()
+            onStatusMessage?("Discovered \(payload.discoveredPiSessions.count) recent Pi session(s) from local sessions.")
         }
 
         // Merge discovered Claude sessions.
@@ -185,6 +220,7 @@ final class SessionDiscoveryCoordinator {
 
         return sessions.first(where: {
             $0.value.claudeMetadata?.transcriptPath == discoveredPath
+                || $0.value.piMetadata?.transcriptPath == discoveredPath
         })?.key
     }
 
@@ -205,6 +241,7 @@ final class SessionDiscoveryCoordinator {
         merged.attachmentState = mergeAttachmentState(existing.attachmentState, discovered.attachmentState)
         merged.jumpTarget = existing.jumpTarget ?? discovered.jumpTarget
         merged.codexMetadata = mergeCodexMetadata(existing.codexMetadata, discovered.codexMetadata)
+        merged.piMetadata = mergePiMetadata(existing.piMetadata, discovered.piMetadata)
         merged.claudeMetadata = mergeClaudeMetadata(existing.claudeMetadata, discovered.claudeMetadata)
         merged.cursorMetadata = mergeCursorMetadata(existing.cursorMetadata, discovered.cursorMetadata)
 
@@ -306,6 +343,29 @@ final class SessionDiscoveryCoordinator {
         return merged.isEmpty ? nil : merged
     }
 
+    private func mergePiMetadata(
+        _ existing: PiSessionMetadata?,
+        _ discovered: PiSessionMetadata?
+    ) -> PiSessionMetadata? {
+        guard let existing else {
+            return discovered?.isEmpty == true ? nil : discovered
+        }
+
+        guard let discovered else {
+            return existing.isEmpty ? nil : existing
+        }
+
+        let merged = PiSessionMetadata(
+            transcriptPath: discovered.transcriptPath ?? existing.transcriptPath,
+            initialUserPrompt: existing.initialUserPrompt ?? discovered.initialUserPrompt ?? discovered.lastUserPrompt,
+            lastUserPrompt: discovered.lastUserPrompt ?? existing.lastUserPrompt,
+            lastAssistantMessage: discovered.lastAssistantMessage ?? existing.lastAssistantMessage,
+            currentTool: discovered.currentTool ?? existing.currentTool,
+            currentCommandPreview: discovered.currentCommandPreview ?? existing.currentCommandPreview
+        )
+        return merged.isEmpty ? nil : merged
+    }
+
     // MARK: - Rollout tracking
 
     func refreshCodexRolloutTracking() {
@@ -357,6 +417,25 @@ final class SessionDiscoveryCoordinator {
         let registry = claudeSessionRegistry
 
         claudeSessionPersistenceTask = Task.detached(priority: .utility) {
+            try? await Task.sleep(for: .milliseconds(250))
+            try? registry.save(records)
+        }
+    }
+
+    func schedulePiSessionPersistence() {
+        piSessionPersistenceTask?.cancel()
+
+        let records = state.sessions
+            .filter {
+                $0.tool == .piAgent
+                    && $0.isTrackedLiveSession
+                    && $0.updatedAt >= Date.now.addingTimeInterval(-86_400)
+                    && ($0.jumpTarget != nil || $0.piMetadata?.transcriptPath != nil)
+            }
+            .map(PiTrackedSessionRecord.init(session:))
+        let registry = piSessionRegistry
+
+        piSessionPersistenceTask = Task.detached(priority: .utility) {
             try? await Task.sleep(for: .milliseconds(250))
             try? registry.save(records)
         }

@@ -63,6 +63,7 @@ Think of it as an open-source [Vibe Island](https://vibeisland.app/) — **free,
 |---|---|---|
 | **Claude Code** | Supported | Hook integration, JSONL session discovery, status line bridge, usage tracking |
 | **Codex** | Supported | Full hook integration (SessionStart, UserPromptSubmit, Stop), usage tracking |
+| **Pi Agent** | Supported | JSONL session discovery via `~/.pi/agent/sessions`, process detection, terminal jump-back |
 | **OpenCode** | Supported | JS plugin integration, permission/question flows, process detection |
 | **Qoder** | Supported | Claude Code fork — same hook format, config at `~/.qoder/settings.json` |
 | **Qwen Code** | Supported | Claude Code fork — same hook format, config at `~/.qwen/settings.json` |

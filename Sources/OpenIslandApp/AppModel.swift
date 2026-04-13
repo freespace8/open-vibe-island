@@ -495,6 +495,7 @@ final class AppModel {
         }
         monitoring.onPersistenceNeeded = { [weak self] in
             self?.discovery.scheduleCodexSessionPersistence()
+            self?.discovery.schedulePiSessionPersistence()
             self?.discovery.scheduleClaudeSessionPersistence()
             self?.discovery.scheduleCursorSessionPersistence()
         }
@@ -1081,6 +1082,7 @@ final class AppModel {
         discovery.refreshCodexRolloutTracking()
         refreshOverlayPlacementIfVisible()
         discovery.scheduleCodexSessionPersistence()
+        discovery.schedulePiSessionPersistence()
         discovery.scheduleClaudeSessionPersistence()
         discovery.scheduleCursorSessionPersistence()
 
