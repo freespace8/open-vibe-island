@@ -576,7 +576,9 @@ final class OverlayPanelController {
             if let actionableID,
                let session = model.state.session(id: actionableID) {
                 let rowHeight = session.estimatedIslandRowHeight(at: now)
-                let bodyHeight = actionableBodyHeight(for: session, model: model)
+                let bodyHeight: CGFloat = session.phase == .completed
+                    ? 0
+                    : actionableBodyHeight(for: session, model: model)
                 return rowHeight + bodyHeight + Self.openedContentVerticalInsets
             }
             return 300

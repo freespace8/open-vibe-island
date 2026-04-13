@@ -577,11 +577,13 @@ struct IslandPanelView: View {
     @ViewBuilder
     private func sessionListContent(context: TimelineViewDefaultContext) -> some View {
         VStack(spacing: 6) {
-            if isNotificationMode, let session = model.activeIslandCardSession {
+                    if isNotificationMode, let session = model.activeIslandCardSession {
+                let showsActionBody = session.phase != .completed
                 IslandSessionRow(
                     session: session,
                     referenceDate: context.date,
                     isActionable: true,
+                    showsActionBody: showsActionBody,
                     useDrawingGroup: model.notchStatus == .opened,
                     isInteractive: model.notchStatus == .opened,
                     lang: model.lang,
@@ -1035,6 +1037,7 @@ private struct IslandSessionRow: View {
     let session: AgentSession
     let referenceDate: Date
     var isActionable: Bool = false
+    var showsActionBody: Bool = true
     var useDrawingGroup: Bool = true
     var isInteractive: Bool = true
     var lang: LanguageManager = .shared
@@ -1170,7 +1173,7 @@ private struct IslandSessionRow: View {
             .padding(.horizontal, isActionable ? 16 : 16)
             .padding(.vertical, isActionable ? 14 : 14)
 
-            if isActionable {
+            if isActionable && showsActionBody {
                 actionableBody
                     .padding(.horizontal, 16)
                     .padding(.bottom, 14)
