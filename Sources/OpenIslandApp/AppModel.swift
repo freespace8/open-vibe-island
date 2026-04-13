@@ -1109,6 +1109,14 @@ final class AppModel {
             lastActionMessage = describe(event)
         }
 
+        if shouldPulseForCompletion(
+            event: event,
+            wasAlreadyCompleted: wasAlreadyCompleted,
+            ingress: ingress
+        ) {
+            notchPop()
+        }
+
         if let surface = IslandSurface.notificationSurface(for: event),
            !wasAlreadyCompleted,
            surface.sessionID.flatMap({ state.session(id: $0) }) != nil,
@@ -1116,6 +1124,26 @@ final class AppModel {
            notchStatus == .closed || notchOpenReason == .notification {
             presentNotificationSurface(surface)
         }
+    }
+
+    private func shouldPulseForCompletion(
+        event: AgentEvent,
+        wasAlreadyCompleted: Bool,
+        ingress: TrackedEventIngress
+    ) -> Bool {
+        guard case let .sessionCompleted(payload) = event else {
+            return false
+        }
+
+        guard payload.isInterrupt != true,
+              !wasAlreadyCompleted,
+              notchStatus == .closed,
+              notchOpenReason == nil,
+              (ingress == .bridge || !isResolvingInitialLiveSessions) else {
+            return false
+        }
+
+        return state.session(id: payload.sessionID) != nil
     }
 
     private func synchronizeSelection() {

@@ -529,6 +529,42 @@ struct AppModelSessionListTests {
     }
 
     @Test
+    func completionEventsPulseClosedIslandInsteadOfOpeningNotification() async throws {
+        let model = AppModel()
+        model.notchStatus = .closed
+        model.notchOpenReason = nil
+
+        model.applyTrackedEvent(
+            .sessionStarted(SessionStarted(
+                sessionID: "session-1",
+                title: "Test",
+                tool: .codex,
+                summary: "Running",
+                timestamp: .now
+            )),
+            updateLastActionMessage: false
+        )
+
+        model.applyTrackedEvent(
+            .sessionCompleted(SessionCompleted(
+                sessionID: "session-1",
+                summary: "Done",
+                timestamp: .now
+            )),
+            updateLastActionMessage: false
+        )
+
+        #expect(model.notchStatus == .popping)
+        #expect(model.notchOpenReason == nil)
+        #expect(model.islandSurface == .sessionList())
+
+        try await Task.sleep(for: .milliseconds(350))
+
+        #expect(model.notchStatus == .closed)
+        #expect(model.notchOpenReason == nil)
+    }
+
+    @Test
     func mergeDiscoveredClaudeSessionsPreservesRegistryJumpTargetAndAddsTranscriptMetadata() {
         let now = Date(timeIntervalSince1970: 2_000)
         let model = AppModel()

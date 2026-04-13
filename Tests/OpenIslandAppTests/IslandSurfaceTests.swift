@@ -75,7 +75,7 @@ struct IslandSurfaceTests {
     }
 
     @Test
-    func completionEventsRouteToActionableSurface() {
+    func completionEventsDoNotRouteToActionableSurface() {
         let event = AgentEvent.sessionCompleted(
             SessionCompleted(
                 sessionID: "session-3",
@@ -84,7 +84,7 @@ struct IslandSurfaceTests {
             )
         )
 
-        #expect(IslandSurface.notificationSurface(for: event) == .sessionList(actionableSessionID: "session-3"))
+        #expect(IslandSurface.notificationSurface(for: event) == nil)
     }
 
     @Test
