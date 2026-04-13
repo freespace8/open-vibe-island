@@ -10,6 +10,7 @@ public struct SessionStarted: Equatable, Codable, Sendable {
     public var timestamp: Date
     public var jumpTarget: JumpTarget?
     public var codexMetadata: CodexSessionMetadata?
+    public var piMetadata: PiSessionMetadata?
     public var claudeMetadata: ClaudeSessionMetadata?
     public var openCodeMetadata: OpenCodeSessionMetadata?
     public var cursorMetadata: CursorSessionMetadata?
@@ -25,6 +26,7 @@ public struct SessionStarted: Equatable, Codable, Sendable {
         timestamp: Date,
         jumpTarget: JumpTarget? = nil,
         codexMetadata: CodexSessionMetadata? = nil,
+        piMetadata: PiSessionMetadata? = nil,
         claudeMetadata: ClaudeSessionMetadata? = nil,
         openCodeMetadata: OpenCodeSessionMetadata? = nil,
         cursorMetadata: CursorSessionMetadata? = nil,
@@ -39,6 +41,7 @@ public struct SessionStarted: Equatable, Codable, Sendable {
         self.timestamp = timestamp
         self.jumpTarget = jumpTarget
         self.codexMetadata = codexMetadata
+        self.piMetadata = piMetadata
         self.claudeMetadata = claudeMetadata
         self.openCodeMetadata = openCodeMetadata
         self.cursorMetadata = cursorMetadata
@@ -203,6 +206,22 @@ public struct CursorSessionMetadataUpdated: Equatable, Codable, Sendable {
     }
 }
 
+public struct PiSessionMetadataUpdated: Equatable, Codable, Sendable {
+    public var sessionID: String
+    public var piMetadata: PiSessionMetadata
+    public var timestamp: Date
+
+    public init(
+        sessionID: String,
+        piMetadata: PiSessionMetadata,
+        timestamp: Date
+    ) {
+        self.sessionID = sessionID
+        self.piMetadata = piMetadata
+        self.timestamp = timestamp
+    }
+}
+
 public struct ActionableStateResolved: Equatable, Codable, Sendable {
     public var sessionID: String
     public var summary: String
@@ -230,6 +249,7 @@ public enum AgentEvent: Equatable, Codable, Sendable {
     case claudeSessionMetadataUpdated(ClaudeSessionMetadataUpdated)
     case openCodeSessionMetadataUpdated(OpenCodeSessionMetadataUpdated)
     case cursorSessionMetadataUpdated(CursorSessionMetadataUpdated)
+    case piSessionMetadataUpdated(PiSessionMetadataUpdated)
     case actionableStateResolved(ActionableStateResolved)
 
     private enum CodingKeys: String, CodingKey {
@@ -244,6 +264,7 @@ public enum AgentEvent: Equatable, Codable, Sendable {
         case claudeSessionMetadataUpdated
         case openCodeSessionMetadataUpdated
         case cursorSessionMetadataUpdated
+        case piSessionMetadataUpdated
         case actionableStateResolved
     }
 
@@ -258,6 +279,7 @@ public enum AgentEvent: Equatable, Codable, Sendable {
         case claudeSessionMetadataUpdated
         case openCodeSessionMetadataUpdated
         case cursorSessionMetadataUpdated
+        case piSessionMetadataUpdated
         case actionableStateResolved
     }
 
@@ -291,6 +313,10 @@ public enum AgentEvent: Equatable, Codable, Sendable {
         case .cursorSessionMetadataUpdated:
             self = .cursorSessionMetadataUpdated(
                 try container.decode(CursorSessionMetadataUpdated.self, forKey: .cursorSessionMetadataUpdated)
+            )
+        case .piSessionMetadataUpdated:
+            self = .piSessionMetadataUpdated(
+                try container.decode(PiSessionMetadataUpdated.self, forKey: .piSessionMetadataUpdated)
             )
         case .actionableStateResolved:
             self = .actionableStateResolved(
@@ -333,6 +359,9 @@ public enum AgentEvent: Equatable, Codable, Sendable {
         case let .cursorSessionMetadataUpdated(payload):
             try container.encode(EventType.cursorSessionMetadataUpdated, forKey: .type)
             try container.encode(payload, forKey: .cursorSessionMetadataUpdated)
+        case let .piSessionMetadataUpdated(payload):
+            try container.encode(EventType.piSessionMetadataUpdated, forKey: .type)
+            try container.encode(payload, forKey: .piSessionMetadataUpdated)
         case let .actionableStateResolved(payload):
             try container.encode(EventType.actionableStateResolved, forKey: .type)
             try container.encode(payload, forKey: .actionableStateResolved)

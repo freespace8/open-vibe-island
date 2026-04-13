@@ -12,6 +12,7 @@ final class HookInstallationCoordinator {
     var factoryHookStatus: ClaudeHookInstallationStatus?
     var codebuddyHookStatus: ClaudeHookInstallationStatus?
     var openCodePluginStatus: OpenCodePluginInstallationStatus?
+    var piExtensionStatus: PiExtensionInstallationStatus?
     var cursorHookStatus: CursorHookInstallationStatus?
     var geminiHookStatus: GeminiHookInstallationStatus?
     var claudeStatusLineStatus: ClaudeStatusLineInstallationStatus?
@@ -25,6 +26,7 @@ final class HookInstallationCoordinator {
     var isFactoryHookSetupBusy = false
     var isCodebuddyHookSetupBusy = false
     var isOpenCodeSetupBusy = false
+    var isPiExtensionSetupBusy = false
     var isCursorHookSetupBusy = false
     var isGeminiHookSetupBusy = false
     var isClaudeUsageSetupBusy = false
@@ -66,6 +68,9 @@ final class HookInstallationCoordinator {
 
     @ObservationIgnored
     private let openCodePluginInstallationManager = OpenCodePluginInstallationManager()
+
+    @ObservationIgnored
+    private let piExtensionInstallationManager = PiExtensionInstallationManager()
 
     @ObservationIgnored
     private let cursorHookInstallationManager = CursorHookInstallationManager()
@@ -119,6 +124,10 @@ final class HookInstallationCoordinator {
 
     var openCodePluginInstalled: Bool {
         openCodePluginStatus?.isInstalled == true
+    }
+
+    var piExtensionInstalled: Bool {
+        piExtensionStatus?.isInstalled == true
     }
 
     var cursorHooksInstalled: Bool {
@@ -288,6 +297,26 @@ final class HookInstallationCoordinator {
         }
 
         return "no managed OpenCode plugin"
+    }
+
+    var piExtensionStatusTitle: String {
+        if piExtensionInstalled {
+            return "Pi extension installed"
+        }
+
+        return "Pi extension not installed"
+    }
+
+    var piExtensionStatusSummary: String {
+        guard let status = piExtensionStatus else {
+            return "Reading ~/.pi/agent/extensions state."
+        }
+
+        if status.isInstalled {
+            return "managed extension present in \(status.extensionsDirectory.path)"
+        }
+
+        return "no managed Pi extension"
     }
 
     var cursorHookStatusTitle: String {
@@ -595,6 +624,16 @@ final class HookInstallationCoordinator {
             group.addTask { @MainActor [weak self] in
                 guard let self else { return }
                 do {
+                    let status = try self.piExtensionInstallationManager.status()
+                    self.piExtensionStatus = status
+                } catch {
+                    self.onStatusMessage?("Failed to read Pi extension status: \(error.localizedDescription)")
+                }
+            }
+
+            group.addTask { @MainActor [weak self] in
+                guard let self else { return }
+                do {
                     let usageState = try self.readClaudeUsageState(repairManagedBridgeIfNeeded: true)
                     self.claudeStatusLineStatus = usageState.status
                     self.claudeUsageSnapshot = usageState.snapshot
@@ -642,6 +681,19 @@ final class HookInstallationCoordinator {
                 self.openCodePluginStatus = status
             } catch {
                 self.onStatusMessage?("Failed to read OpenCode plugin status: \(error.localizedDescription)")
+            }
+        }
+    }
+
+    func refreshPiExtensionStatus() {
+        Task { [weak self] in
+            guard let self else { return }
+
+            do {
+                let status = try self.piExtensionInstallationManager.status()
+                self.piExtensionStatus = status
+            } catch {
+                self.onStatusMessage?("Failed to read Pi extension status: \(error.localizedDescription)")
             }
         }
     }
@@ -846,6 +898,34 @@ final class HookInstallationCoordinator {
         }
     }
 
+    func installPiExtension() {
+        guard let extensionData = loadBundledPiExtension() else {
+            onStatusMessage?("Could not find the bundled Pi extension resource.")
+            return
+        }
+
+        isPiExtensionSetupBusy = true
+        onStatusMessage?("Installing Pi extension.")
+
+        Task { [weak self] in
+            guard let self else { return }
+
+            defer { self.isPiExtensionSetupBusy = false }
+
+            do {
+                let status = try self.piExtensionInstallationManager.install(extensionSourceData: extensionData)
+                self.piExtensionStatus = status
+                if status.isInstalled {
+                    self.onStatusMessage?("Pi extension is installed. Restart Pi to activate.")
+                } else {
+                    self.onStatusMessage?("Pi extension installation incomplete.")
+                }
+            } catch {
+                self.onStatusMessage?("Pi extension install failed: \(error.localizedDescription)")
+            }
+        }
+    }
+
     func uninstallOpenCodePlugin() {
         isOpenCodeSetupBusy = true
         onStatusMessage?("Removing OpenCode plugin.")
@@ -861,6 +941,25 @@ final class HookInstallationCoordinator {
                 self.onStatusMessage?("OpenCode plugin removed.")
             } catch {
                 self.onStatusMessage?("OpenCode plugin removal failed: \(error.localizedDescription)")
+            }
+        }
+    }
+
+    func uninstallPiExtension() {
+        isPiExtensionSetupBusy = true
+        onStatusMessage?("Removing Pi extension.")
+
+        Task { [weak self] in
+            guard let self else { return }
+
+            defer { self.isPiExtensionSetupBusy = false }
+
+            do {
+                let status = try self.piExtensionInstallationManager.uninstall()
+                self.piExtensionStatus = status
+                self.onStatusMessage?("Pi extension removed.")
+            } catch {
+                self.onStatusMessage?("Pi extension removal failed: \(error.localizedDescription)")
             }
         }
     }
@@ -1109,6 +1208,18 @@ final class HookInstallationCoordinator {
 
         // Fallback: Bundle.main for Xcode builds
         if let url = Bundle.main.url(forResource: "open-island-opencode", withExtension: "js") {
+            return try? Data(contentsOf: url)
+        }
+
+        return nil
+    }
+
+    private func loadBundledPiExtension() -> Data? {
+        if let url = Bundle.appResources.url(forResource: "open-island-pi", withExtension: "ts") {
+            return try? Data(contentsOf: url)
+        }
+
+        if let url = Bundle.main.url(forResource: "open-island-pi", withExtension: "ts") {
             return try? Data(contentsOf: url)
         }
 

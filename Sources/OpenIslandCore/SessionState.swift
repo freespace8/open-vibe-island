@@ -67,6 +67,7 @@ public struct SessionState: Equatable, Sendable {
                 updatedAt: payload.timestamp,
                 jumpTarget: payload.jumpTarget,
                 codexMetadata: payload.codexMetadata?.isEmpty == true ? nil : payload.codexMetadata,
+                piMetadata: payload.piMetadata?.isEmpty == true ? nil : payload.piMetadata,
                 claudeMetadata: payload.claudeMetadata?.isEmpty == true ? nil : payload.claudeMetadata,
                 openCodeMetadata: payload.openCodeMetadata?.isEmpty == true ? nil : payload.openCodeMetadata,
                 cursorMetadata: payload.cursorMetadata?.isEmpty == true ? nil : payload.cursorMetadata
@@ -197,6 +198,16 @@ public struct SessionState: Equatable, Sendable {
 
             reviveHookManagedSessionIfNeeded(&session)
             session.cursorMetadata = payload.cursorMetadata.isEmpty ? nil : payload.cursorMetadata
+            session.updatedAt = payload.timestamp
+            upsert(session)
+
+        case let .piSessionMetadataUpdated(payload):
+            guard var session = sessionsByID[payload.sessionID] else {
+                return
+            }
+
+            reviveHookManagedSessionIfNeeded(&session)
+            session.piMetadata = payload.piMetadata.isEmpty ? nil : payload.piMetadata
             session.updatedAt = payload.timestamp
             upsert(session)
 

@@ -88,6 +88,7 @@ final class AppModel {
     var isFactoryHookSetupBusy: Bool { hooks.isFactoryHookSetupBusy }
     var isCodebuddyHookSetupBusy: Bool { hooks.isCodebuddyHookSetupBusy }
     var openCodePluginInstalled: Bool { hooks.openCodePluginInstalled }
+    var piExtensionInstalled: Bool { hooks.piExtensionInstalled }
     var claudeUsageInstalled: Bool { hooks.claudeUsageInstalled }
     var claudeHookStatusTitle: String { hooks.claudeHookStatusTitle }
     var claudeHookStatusSummary: String { hooks.claudeHookStatusSummary }
@@ -98,9 +99,13 @@ final class AppModel {
     var codexUsageStatusSummary: String { hooks.codexUsageStatusSummary }
     var codexUsageSummaryText: String? { hooks.codexUsageSummaryText }
     var openCodePluginStatus: OpenCodePluginInstallationStatus? { hooks.openCodePluginStatus }
+    var piExtensionStatus: PiExtensionInstallationStatus? { hooks.piExtensionStatus }
     var isOpenCodeSetupBusy: Bool { hooks.isOpenCodeSetupBusy }
+    var isPiExtensionSetupBusy: Bool { hooks.isPiExtensionSetupBusy }
     var openCodePluginStatusTitle: String { hooks.openCodePluginStatusTitle }
     var openCodePluginStatusSummary: String { hooks.openCodePluginStatusSummary }
+    var piExtensionStatusTitle: String { hooks.piExtensionStatusTitle }
+    var piExtensionStatusSummary: String { hooks.piExtensionStatusSummary }
     var claudeHealthReport: HookHealthReport? { hooks.claudeHealthReport }
     var codexHealthReport: HookHealthReport? { hooks.codexHealthReport }
     var cursorHooksInstalled: Bool { hooks.cursorHooksInstalled }
@@ -117,6 +122,7 @@ final class AppModel {
     func refreshCodexHookStatus() { hooks.refreshCodexHookStatus() }
     func refreshClaudeHookStatus() { hooks.refreshClaudeHookStatus() }
     func refreshOpenCodePluginStatus() { hooks.refreshOpenCodePluginStatus() }
+    func refreshPiExtensionStatus() { hooks.refreshPiExtensionStatus() }
     func refreshCursorHookStatus() { hooks.refreshCursorHookStatus() }
     func refreshClaudeUsageState() { hooks.refreshClaudeUsageState() }
     func refreshCodexUsageState() { hooks.refreshCodexUsageState() }
@@ -135,6 +141,8 @@ final class AppModel {
     func refreshCCForkHookStatuses() { hooks.refreshCCForkHookStatuses() }
     func installOpenCodePlugin() { hooks.installOpenCodePlugin() }
     func uninstallOpenCodePlugin() { hooks.uninstallOpenCodePlugin() }
+    func installPiExtension() { hooks.installPiExtension() }
+    func uninstallPiExtension() { hooks.uninstallPiExtension() }
     func installCursorHooks() { hooks.installCursorHooks() }
     func uninstallCursorHooks() { hooks.uninstallCursorHooks() }
     func refreshGeminiHookStatus() { hooks.refreshGeminiHookStatus() }
@@ -1100,8 +1108,9 @@ final class AppModel {
                 case let .claudeSessionMetadataUpdated(p): return p.sessionID
                 case let .openCodeSessionMetadataUpdated(p): return p.sessionID
                 case let .cursorSessionMetadataUpdated(p): return p.sessionID
+                case let .piSessionMetadataUpdated(p): return p.sessionID
                 case let .actionableStateResolved(p): return p.sessionID
-                }
+            }
             }()
             let session = eventSessionID.flatMap { state.session(id: $0) }
             relay.notifyEvent(event, session: session)
@@ -1172,6 +1181,11 @@ final class AppModel {
         hooks.hooksBinaryURL = payload.hooksBinaryURL
         hooks.updateHooksBinaryIfNeeded()
 
+        hooks.refreshPiExtensionStatus()
+        if !piExtensionInstalled {
+            installPiExtension()
+        }
+
         // Auto-install missing hooks and usage bridge, then run health checks.
         if payload.hooksBinaryURL != nil {
             Task { @MainActor [weak self] in
@@ -1187,6 +1201,7 @@ final class AppModel {
                 if !self.factoryHooksInstalled { self.installFactoryHooks() }
                 if !self.codebuddyHooksInstalled { self.installCodebuddyHooks() }
                 if !self.openCodePluginInstalled { self.installOpenCodePlugin() }
+                if !self.piExtensionInstalled { self.installPiExtension() }
                 if !self.cursorHooksInstalled { self.installCursorHooks() }
                 if !self.claudeUsageInstalled { self.installClaudeUsageBridge() }
 
@@ -1353,6 +1368,12 @@ final class AppModel {
             }
 
             return payload.cursorMetadata.lastAssistantMessage ?? "Cursor session metadata updated."
+        case let .piSessionMetadataUpdated(payload):
+            if let currentTool = payload.piMetadata.currentTool {
+                return "Pi is running \(currentTool)."
+            }
+
+            return payload.piMetadata.lastAssistantMessage ?? "Pi session metadata updated."
         case let .actionableStateResolved(payload):
             return "Actionable state resolved for session \(payload.sessionID)."
         }

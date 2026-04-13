@@ -434,6 +434,8 @@ public final class BridgeServer: @unchecked Sendable {
 
         case let .processGeminiHook(payload):
             handleGeminiHook(payload, from: clientID)
+        case let .processPiHook(payload):
+            handlePiHook(payload, from: clientID)
         }
     }
 
@@ -1212,6 +1214,107 @@ public final class BridgeServer: @unchecked Sendable {
         }
     }
 
+    private func handlePiHook(_ payload: PiHookPayload, from clientID: UUID) {
+        switch payload.hookEventName {
+        case .sessionStart:
+            ensurePiSessionExists(for: payload, forceStart: true)
+            synchronizePiJumpTarget(for: payload)
+            synchronizePiMetadata(for: payload)
+            emit(
+                .activityUpdated(
+                    SessionActivityUpdated(
+                        sessionID: payload.sessionID,
+                        summary: payload.implicitStartSummary,
+                        phase: .running,
+                        timestamp: .now
+                    )
+                )
+            )
+            send(.response(.acknowledged), to: clientID)
+
+        case .userPromptSubmit:
+            ensurePiSessionExists(for: payload)
+            synchronizePiJumpTarget(for: payload)
+            synchronizePiMetadata(for: payload)
+            emit(
+                .activityUpdated(
+                    SessionActivityUpdated(
+                        sessionID: payload.sessionID,
+                        summary: payload.promptPreview.map { "Prompt: \($0)" } ?? payload.implicitStartSummary,
+                        phase: .running,
+                        timestamp: .now
+                    )
+                )
+            )
+            send(.response(.acknowledged), to: clientID)
+
+        case .preToolUse:
+            ensurePiSessionExists(for: payload)
+            synchronizePiJumpTarget(for: payload)
+            synchronizePiMetadata(for: payload)
+            let summary = payload.toolName.map { "Running \($0)" } ?? "Running Pi tool"
+            emit(
+                .activityUpdated(
+                    SessionActivityUpdated(
+                        sessionID: payload.sessionID,
+                        summary: payload.toolInputPreview.map { "\(summary): \($0)" } ?? summary,
+                        phase: .running,
+                        timestamp: .now
+                    )
+                )
+            )
+            send(.response(.acknowledged), to: clientID)
+
+        case .postToolUse:
+            ensurePiSessionExists(for: payload)
+            synchronizePiJumpTarget(for: payload)
+            synchronizePiMetadata(for: payload)
+            emit(
+                .activityUpdated(
+                    SessionActivityUpdated(
+                        sessionID: payload.sessionID,
+                        summary: payload.toolName.map { "\($0) finished." } ?? "Pi tool finished.",
+                        phase: .running,
+                        timestamp: .now
+                    )
+                )
+            )
+            send(.response(.acknowledged), to: clientID)
+
+        case .stop:
+            ensurePiSessionExists(for: payload)
+            synchronizePiJumpTarget(for: payload)
+            synchronizePiMetadata(for: payload)
+            emit(
+                .sessionCompleted(
+                    SessionCompleted(
+                        sessionID: payload.sessionID,
+                        summary: payload.lastAssistantMessage ?? payload.assistantMessagePreview ?? "Pi completed the turn.",
+                        timestamp: .now
+                    )
+                )
+            )
+            send(.response(.acknowledged), to: clientID)
+
+        case .sessionEnd:
+            ensurePiSessionExists(for: payload)
+            synchronizePiJumpTarget(for: payload)
+            synchronizePiMetadata(for: payload)
+            emit(
+                .sessionCompleted(
+                    SessionCompleted(
+                        sessionID: payload.sessionID,
+                        summary: "Pi session ended.",
+                        timestamp: .now,
+                        isInterrupt: true,
+                        isSessionEnd: true
+                    )
+                )
+            )
+            send(.response(.acknowledged), to: clientID)
+        }
+    }
+
     private func handleGeminiHook(_ payload: GeminiHookPayload, from clientID: UUID) {
         switch payload.hookEventName {
         case .sessionStart:
@@ -1342,6 +1445,82 @@ public final class BridgeServer: @unchecked Sendable {
                     timestamp: .now,
                     jumpTarget: payload.defaultJumpTarget,
                     cursorMetadata: payload.defaultCursorMetadata.isEmpty ? nil : payload.defaultCursorMetadata
+                )
+            )
+        )
+    }
+
+    private func ensurePiSessionExists(for payload: PiHookPayload, forceStart: Bool = false) {
+        guard forceStart || !hasSession(id: payload.sessionID) else {
+            return
+        }
+
+        emit(
+            .sessionStarted(
+                SessionStarted(
+                    sessionID: payload.sessionID,
+                    title: payload.sessionTitle,
+                    tool: .piAgent,
+                    origin: .live,
+                    initialPhase: .running,
+                    summary: payload.implicitStartSummary,
+                    timestamp: .now,
+                    jumpTarget: payload.defaultJumpTarget,
+                    piMetadata: payload.defaultPiMetadata.isEmpty ? nil : payload.defaultPiMetadata
+                )
+            )
+        )
+    }
+
+    private func synchronizePiJumpTarget(for payload: PiHookPayload) {
+        guard let existingSession = localState.session(id: payload.sessionID) else {
+            return
+        }
+
+        let jumpTarget = Self.mergeJumpTargetPreservingExistingResolvedFields(
+            incoming: payload.defaultJumpTarget,
+            existing: existingSession.jumpTarget
+        )
+
+        guard existingSession.jumpTarget != jumpTarget else {
+            return
+        }
+
+        emit(
+            .jumpTargetUpdated(
+                JumpTargetUpdated(
+                    sessionID: payload.sessionID,
+                    jumpTarget: jumpTarget,
+                    timestamp: .now
+                )
+            )
+        )
+    }
+
+    private func synchronizePiMetadata(for payload: PiHookPayload) {
+        guard let existingSession = localState.session(id: payload.sessionID) else {
+            return
+        }
+
+        let mergedMetadata = mergedPiMetadata(
+            existing: existingSession.piMetadata,
+            update: payload.defaultPiMetadata,
+            hookEventName: payload.hookEventName
+        )
+        guard !mergedMetadata.isEmpty else {
+            return
+        }
+
+        guard existingSession.piMetadata != mergedMetadata else {
+            return
+        }
+
+        emit(
+            .piSessionMetadataUpdated(
+                PiSessionMetadataUpdated(
+                    sessionID: payload.sessionID,
+                    piMetadata: mergedMetadata,
+                    timestamp: .now
                 )
             )
         )
@@ -1875,6 +2054,63 @@ public final class BridgeServer: @unchecked Sendable {
                 hookEventName: hookEventName
             )
         )
+    }
+
+    private func mergedPiMetadata(
+        existing: PiSessionMetadata?,
+        update: PiSessionMetadata,
+        hookEventName: PiHookEventName
+    ) -> PiSessionMetadata {
+        PiSessionMetadata(
+            transcriptPath: update.transcriptPath ?? existing?.transcriptPath,
+            initialUserPrompt: existing?.initialUserPrompt ?? update.initialUserPrompt ?? update.lastUserPrompt,
+            lastUserPrompt: update.lastUserPrompt ?? existing?.lastUserPrompt,
+            lastAssistantMessage: update.lastAssistantMessage ?? existing?.lastAssistantMessage,
+            currentTool: mergedPiCurrentTool(
+                existing: existing?.currentTool,
+                update: update.currentTool,
+                hookEventName: hookEventName
+            ),
+            currentCommandPreview: mergedPiCurrentCommandPreview(
+                existing: existing?.currentCommandPreview,
+                update: update.currentCommandPreview,
+                hookEventName: hookEventName
+            )
+        )
+    }
+
+    private func mergedPiCurrentTool(
+        existing: String?,
+        update: String?,
+        hookEventName: PiHookEventName
+    ) -> String? {
+        if let update {
+            return update
+        }
+
+        switch hookEventName {
+        case .userPromptSubmit, .postToolUse, .stop, .sessionEnd:
+            return nil
+        case .sessionStart, .preToolUse:
+            return existing
+        }
+    }
+
+    private func mergedPiCurrentCommandPreview(
+        existing: String?,
+        update: String?,
+        hookEventName: PiHookEventName
+    ) -> String? {
+        if let update {
+            return update
+        }
+
+        switch hookEventName {
+        case .userPromptSubmit, .postToolUse, .stop, .sessionEnd:
+            return nil
+        case .sessionStart, .preToolUse:
+            return existing
+        }
     }
 
     private func mergedCurrentTool(

@@ -398,6 +398,7 @@ struct SetupSettingsPane: View {
     @State private var confirmingUninstallClaude = false
     @State private var confirmingUninstallCodex = false
     @State private var confirmingUninstallOpenCode = false
+    @State private var confirmingUninstallPi = false
     @State private var confirmingUninstallQoder = false
     @State private var confirmingUninstallQwenCode = false
     @State private var confirmingUninstallFactory = false
@@ -459,6 +460,23 @@ struct SetupSettingsPane: View {
                     Button(lang.t("settings.general.cancel"), role: .cancel) {}
                 } message: {
                     Text("This will remove the Open Island plugin from ~/.config/opencode/plugins/.")
+                }
+
+                hookRow(
+                    name: "Pi Agent",
+                    installed: model.piExtensionInstalled,
+                    busy: model.isPiExtensionSetupBusy,
+                    requiresBinary: false,
+                    installAction: { model.installPiExtension() },
+                    uninstallAction: { confirmingUninstallPi = true }
+                )
+                .alert(lang.t("settings.general.uninstallConfirmTitle"), isPresented: $confirmingUninstallPi) {
+                    Button(lang.t("settings.general.uninstallConfirmAction"), role: .destructive) {
+                        model.uninstallPiExtension()
+                    }
+                    Button(lang.t("settings.general.cancel"), role: .cancel) {}
+                } message: {
+                    Text("This will remove the Open Island extension from ~/.pi/agent/extensions/.")
                 }
 
                 hookRow(
@@ -611,6 +629,7 @@ struct SetupSettingsPane: View {
                     if !model.claudeHooksInstalled { model.installClaudeHooks() }
                     if !model.codexHooksInstalled { model.installCodexHooks() }
                     if !model.openCodePluginInstalled { model.installOpenCodePlugin() }
+                    if !model.piExtensionInstalled { model.installPiExtension() }
                     if !model.qoderHooksInstalled { model.installQoderHooks() }
                     if !model.qwenCodeHooksInstalled { model.installQwenCodeHooks() }
                     if !model.factoryHooksInstalled { model.installFactoryHooks() }
@@ -676,6 +695,7 @@ struct SetupSettingsPane: View {
 
     private var allReady: Bool {
         model.claudeHooksInstalled && model.codexHooksInstalled && model.openCodePluginInstalled
+            && model.piExtensionInstalled
             && model.qoderHooksInstalled && model.qwenCodeHooksInstalled && model.factoryHooksInstalled && model.codebuddyHooksInstalled
             && model.cursorHooksInstalled && model.geminiHooksInstalled && model.claudeUsageInstalled
     }
